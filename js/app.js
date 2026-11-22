@@ -1448,7 +1448,7 @@
   }, 60000);
 })();
 
-/* === OWNER LONG-PRESS CUSTOM HOME BANNER ADD-ON (FIXED) === */
+/* === OWNER LONG-PRESS CUSTOM HOME BANNER ADD-ON (READY) === */
 (function () {
   const modal = document.getElementById("ownerProductModal");
   const form = document.getElementById("ownerProductForm");
@@ -1471,6 +1471,22 @@
       img.onerror = () => resolve(file);
       img.src = url;
     });
+  }
+
+  async function ensureSession(sb) {
+    if (!sb) return;
+    const authKey = Object.keys(localStorage).find((k) => k.startsWith("sb-") && k.endsWith("-auth-token"));
+    if (authKey) {
+      try {
+        const parsedAuth = JSON.parse(localStorage.getItem(authKey) || "null");
+        if (parsedAuth?.access_token && parsedAuth?.refresh_token) {
+          await sb.auth.setSession({
+            access_token: parsedAuth.access_token,
+            refresh_token: parsedAuth.refresh_token
+          });
+        }
+      } catch (_) {}
+    }
   }
 
   function injectHomeBannerOption() {
@@ -1531,6 +1547,8 @@
           ? window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey)
           : null;
 
+        await ensureSession(sb);
+
         let bannerImg = prod ? prod.image : "";
         const rawFile = bannerBox.querySelector("#customBannerFile")?.files?.[0];
 
@@ -1545,7 +1563,7 @@
             const { data } = sb.storage.from(cfg.supabase.storageBucket || "shop-media").getPublicUrl(path);
             if (data?.publicUrl) bannerImg = data.publicUrl;
           } else {
-            alert("Photo upload error: " + upErr.message + "\n(Check Supabase Storage bucket 'shop-media' policies)");
+            alert("Photo upload error: " + upErr.message);
           }
         }
 
@@ -1553,7 +1571,7 @@
         const subtitleText = (bannerBox.querySelector("#customBannerSubtitle").value || "").trim() ||
           (prod ? `₹${Number(prod.price || 0).toLocaleString("en-IN")} • Available at Aakansha Ladies Shop` : "Visit Aakansha Ladies Shop");
 
-        const newBanner = {
+        const localBanner = {
           id: "ban-" + Date.now(),
           title_en: titleText,
           title_mr: titleText,
@@ -1568,15 +1586,27 @@
           sort_order: 0
         };
 
+        let dbBanner = { ...localBanner };
+        if (sb && dbBanner.product_id) {
+          const { data: existingProd } = await sb
+            .from("products")
+            .select("id")
+            .eq("id", dbBanner.product_id)
+            .maybeSingle();
+          if (!existingProd) {
+            dbBanner.product_id = null;
+          }
+        }
+
         if (sb) {
-          const { error: dbErr } = await sb.from("banners").insert([newBanner]);
+          const { error: dbErr } = await sb.from("banners").insert([dbBanner]);
           if (dbErr) {
             alert("Database save error: " + dbErr.message);
             return;
           }
         }
 
-        storeState.banners = [newBanner, ...(storeState.banners || [])];
+        storeState.banners = [localBanner, ...(storeState.banners || [])];
         localStorage.setItem("aakansha_store_state_v1", JSON.stringify(storeState));
 
         modal.classList.add("hidden");
