@@ -1472,3 +1472,58 @@ body {
     padding: 18px;
   }
 }
+
+/* Mobile Layout & Overflow Fix */
+html, body {
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 768px) {
+  header,
+  .header,
+  .top-bar,
+  .navbar,
+  .nav,
+  section,
+  .container,
+  .wrapper,
+  .hero,
+  .banner,
+  .banner-card,
+  .category-card,
+  .product-card {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .banner-card,
+  .hero,
+  [class*="banner"],
+  [class*="hero"] {
+    min-width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .banner-card h1,
+  .banner-card h2,
+  .banner-card p,
+  .hero h1,
+  .hero h2,
+  .hero p,
+  [class*="banner"] h1,
+  [class*="banner"] h2,
+  [class*="banner"] p {
+    max-width: 100% !important;
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important;
+  }
+}
