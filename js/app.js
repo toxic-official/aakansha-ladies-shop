@@ -2333,3 +2333,19 @@
 
   setTimeout(ensureUserLoginTabButton, 450);
 })();
+/* === HIDE BIG BOXES ON OVERVIEW, KEEP ONLY "User Login" TAB === */
+(function () {
+  function hideOverviewLoginBoxes() {
+    ["myLoginUsersBox", "ownerLoginHistoryCard", "ownerCustomerMembersBox", "ownerLoginUsersInsideBox"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    });
+  }
+
+  new MutationObserver(() => setTimeout(hideOverviewLoginBoxes, 100)).observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  setTimeout(hideOverviewLoginBoxes, 300);
+})();
