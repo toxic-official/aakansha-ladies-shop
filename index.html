@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aakansha Ladies Shop — Babhaleshwar, Ahilyanagar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,600&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+
+  <!-- 1. FIRST-VISIT LANGUAGE SELECTION MODAL (NO NEXT/CONTINUE BUTTON) -->
+  <div id="languageOverlay" class="lang-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="langTitle">
+    <div class="lang-card">
+      <div class="brand-crest">
+        <span class="crest-monogram">AL</span>
+      </div>
+      <p class="lang-eyebrow">AAKANSHA LADIES SHOP • BABHALESHWAR</p>
+      <h1 id="langTitle" class="lang-title">Select Your Language</h1>
+      <p class="lang-subtitle">भाषा निवडा • अपनी भाषा चुनें</p>
+      <div class="lang-options" role="group" aria-label="Language Selection">
+        <button type="button" class="lang-choice-btn" data-lang="en">
+          <span class="lang-index">01</span>
+          <span class="lang-main">English</span>
+          <span class="lang-sub">Continue in English</span>
+        </button>
+        <button type="button" class="lang-choice-btn" data-lang="mr">
+          <span class="lang-index">02</span>
+          <span class="lang-main devanagari">मराठी</span>
+          <span class="lang-sub devanagari">मराठीमध्ये पुढे चला</span>
+        </button>
+        <button type="button" class="lang-choice-btn" data-lang="hi">
+          <span class="lang-index">03</span>
+          <span class="lang-main devanagari">हिंदी</span>
+          <span class="lang-sub devanagari">हिंदी में आगे बढ़ें</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOP ANNOUNCEMENT BAR (IN-STORE PICKUP ONLY — NO HOME DELIVERY) -->
+  <div class="top-notice">
+    <div class="container top-notice-inner">
+      <span id="storeNoticeText">In-Store Collection Only • Near Maharashtra Bank, Babhaleshwar, Tal. Rahata, Dist. Ahilyanagar - 413737</span>
+      <span class="notice-badge" id="holdRuleBadge">48-Hour Reserved Hold</span>
+    </div>
+  </div>
+
+  <!-- MAIN NAVIGATION HEADER -->
+  <header class="site-header" id="topHeader">
+    <div class="container header-inner">
+      <a href="#home" class="brand-logo" id="brandLogoLink" aria-label="Aakansha Ladies Shop Home">
+        <span class="logo-emblem">AL</span>
+        <span class="logo-text">
+          <strong id="shopNameDisplay">Aakansha Ladies Shop</strong>
+          <small id="shopLocationShort">Babhaleshwar • 413737</small>
+        </span>
+      </a>
+
+      <nav class="primary-nav" id="primaryNav" aria-label="Primary Navigation">
+        <a href="#home" data-i18n="nav_home">Home</a>
+        <a href="#categories-section" data-i18n="nav_categories">Categories</a>
+        <a href="#new-arrivals-section" data-i18n="nav_new_arrivals">New Arrivals</a>
+        <a href="#popular-section" data-i18n="nav_popular">Popular</a>
+        <a href="#all-products-section" data-i18n="nav_all_products">All Products</a>
+        <a href="#contact-location-section" data-i18n="nav_visit">Visit Shop</a>
+      </nav>
+
+      <div class="header-actions">
+        <div class="lang-switcher" aria-label="Change Language">
+          <button type="button" class="lang-pill" data-lang="en">EN</button>
+          <button type="button" class="lang-pill" data-lang="mr">मराठी</button>
+          <button type="button" class="lang-pill" data-lang="hi">हिंदी</button>
+        </div>
+
+        <button type="button" class="icon-action-btn" id="openWishlistBtn" aria-label="Wishlist">
+          <span class="btn-label" data-i18n="nav_wishlist">Wishlist</span>
+          <span class="count-pill" id="wishlistCountBadge">0</span>
+        </button>
+
+        <button type="button" class="owner-portal-btn" id="openOwnerPortalBtn">
+          <span id="ownerBtnText">Owner Login</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- DYNAMIC ROUTE / PAGE CONTAINER -->
+  <main id="appMain">
+
+    <!-- ================= HOMEPAGE VIEW ================= -->
+    <div id="homeView">
+
+      <!-- 2. AUTOMATIC BANNER CAROUSEL (3s RIGHT-TO-LEFT SLIDE, SWIPE, ARROWS, STATIC WHEN 1) -->
+      <section class="banner-section" aria-label="Featured Store Banners">
+        <div class="container">
+          <div class="carousel-shell" id="bannerCarouselShell">
+            <div class="carousel-track" id="bannerTrack"></div>
+
+            <button type="button" class="carousel-arrow prev" id="bannerPrevBtn" aria-label="Previous Banner">&#8592;</button>
+            <button type="button" class="carousel-arrow next" id="bannerNextBtn" aria-label="Next Banner">&#8594;</button>
+
+            <div class="carousel-dots" id="bannerDots" role="tablist" aria-label="Banner Slides"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. SHOP BY CATEGORIES -->
+      <section class="page-section" id="categories-section">
+        <div class="container">
+          <div class="section-header">
+            <div>
+              <p class="section-eyebrow" data-i18n="cat_eyebrow">CURATED COLLECTIONS</p>
+              <h2 class="section-title" data-i18n="cat_title">Shop by Categories</h2>
+            </div>
+            <div class="section-actions">
+              <button type="button" class="secondary-btn hidden" id="adminAddCategoryInlineBtn" onclick="openAdminTab('categories')">+ <span data-i18n="add_category">Add Category</span></button>
+              <button type="button" class="outline-btn" id="toggleMoreCategoriesBtn" data-i18n="more_categories">More Categories</button>
+            </div>
+          </div>
+          <div class="category-grid" id="categoryGrid"></div>
+        </div>
+      </section>
+
+      <!-- 4. NEW ARRIVALS -->
+      <section class="page-section alt-surface" id="new-arrivals-section">
+        <div class="container">
+          <div class="section-header">
+            <div>
+              <p class="section-eyebrow" data-i18n="new_eyebrow">FRESH IN STORE</p>
+              <h2 class="section-title" data-i18n="new_title">New Arrivals</h2>
+            </div>
+            <span class="section-note" data-i18n="new_note">Tap any item to view in its category page</span>
+          </div>
+          <div class="product-grid" id="newArrivalsGrid"></div>
+        </div>
+      </section>
+
+      <!-- 5. POPULAR PRODUCTS -->
+      <section class="page-section" id="popular-section">
+        <div class="container">
+          <div class="section-header">
+            <div>
+              <p class="section-eyebrow" data-i18n="pop_eyebrow">CUSTOMER FAVORITES</p>
+              <h2 class="section-title" data-i18n="pop_title">Popular Products</h2>
+            </div>
+            <span class="section-note" data-i18n="pickup_note">In-store pickup only • No home delivery</span>
+          </div>
+          <div class="product-grid" id="popularProductsGrid"></div>
+        </div>
+      </section>
+
+      <!-- 6. ALL PRODUCTS -->
+      <section class="page-section alt-surface" id="all-products-section">
+        <div class="container">
+          <div class="section-header">
+            <div>
+              <p class="section-eyebrow" data-i18n="all_eyebrow">COMPLETE CATALOGUE</p>
+              <h2 class="section-title" data-i18n="all_title">All Products</h2>
+            </div>
+            <div class="filter-controls">
+              <input type="search" id="allProductsSearch" class="search-input" placeholder="Search sarees, bangles, blouses..." />
+              <select id="allProductsSort" class="sort-select" aria-label="Sort All Products">
+                <option value="featured" data-i18n="sort_featured">Featured Order</option>
+                <option value="price_asc" data-i18n="sort_price_asc">Price: Low to High</option>
+                <option value="price_desc" data-i18n="sort_price_desc">Price: High to Low</option>
+                <option value="stock_desc" data-i18n="sort_stock">Highest Stock</option>
+              </select>
+            </div>
+          </div>
+          <div class="product-grid" id="allProductsGrid"></div>
+        </div>
+      </section>
+
+      <!-- 7. CUSTOMER WISHLIST PREVIEW SECTION ON HOMEPAGE -->
+      <section class="page-section" id="wishlist-section">
+        <div class="container">
+          <div class="section-header">
+            <div>
+              <p class="section-eyebrow" data-i18n="wish_eyebrow">SAVED FOR LATER</p>
+              <h2 class="section-title" data-i18n="wish_title">Your Wishlist</h2>
+            </div>
+            <button type="button" class="outline-btn" id="clearWishlistBtn" data-i18n="clear_wishlist">Clear Wishlist</button>
+          </div>
+          <div class="product-grid" id="homeWishlistGrid"></div>
+        </div>
+      </section>
+
+      <!-- 8. CUSTOMER FEEDBACK SECTION -->
+      <section class="page-section alt-surface" id="feedback-section">
+        <div class="container">
+          <div class="feedback-layout">
+            <div class="feedback-form-card">
+              <p class="section-eyebrow" data-i18n="fb_eyebrow">SHARE YOUR EXPERIENCE</p>
+              <h2 class="section-title" data-i18n="fb_title">Customer Feedback</h2>
+              <p class="muted-copy" data-i18n="fb_subtitle">Visited Aakansha Ladies Shop in Babhaleshwar? Rate your shopping experience from 1 to 5 stars.</p>
+
+              <form id="feedbackForm" class="stack-form">
+                <div class="form-group">
+                  <label for="feedbackName" data-i18n="lbl_your_name">Your Name</label>
+                  <input type="text" id="feedbackName" required maxlength="80" placeholder="e.g., Sunita Deshmukh" />
+                </div>
+
+                <div class="form-group">
+                  <label data-i18n="lbl_rating">Rating (1 to 5 Stars)</label>
+                  <div class="star-selector" id="starSelector" role="radiogroup" aria-label="Rating from 1 to 5 stars">
+                    <button type="button" class="star-btn active" data-rating="1" aria-label="1 Star">&#9733;</button>
+                    <button type="button" class="star-btn active" data-rating="2" aria-label="2 Stars">&#9733;</button>
+                    <button type="button" class="star-btn active" data-rating="3" aria-label="3 Stars">&#9733;</button>
+                    <button type="button" class="star-btn active" data-rating="4" aria-label="4 Stars">&#9733;</button>
+                    <button type="button" class="star-btn active" data-rating="5" aria-label="5 Stars">&#9733;</button>
+                    <span class="rating-readout" id="ratingReadout">5 / 5</span>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="feedbackComment" data-i18n="lbl_feedback">Your Feedback</label>
+                  <textarea id="feedbackComment" rows="3" required maxlength="600" placeholder="Tell us about our sarees, bangles, stitching, or service..."></textarea>
+                </div>
+
+                <button type="submit" class="gold-btn" data-i18n="btn_submit_feedback">Submit Review</button>
+              </form>
+            </div>
+
+            <div class="feedback-list-column">
+              <div class="section-header compact">
+                <div>
+                  <p class="section-eyebrow" data-i18n="fb_list_eyebrow">VERIFIED SHOPPER REVIEWS</p>
+                  <h3 class="subsection-title" data-i18n="fb_list_title">Recent Customer Feedback</h3>
+                </div>
+              </div>
+              <div class="feedback-grid" id="feedbackList"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9 & 10. CONTACT INFORMATION & SHOP LOCATION -->
+      <section class="page-section" id="contact-location-section">
+        <div class="container">
+          <div class="section-header">
+            <div>
+              <p class="section-eyebrow" data-i18n="loc_eyebrow">VISIT OUR PHYSICAL STORE</p>
+              <h2 class="section-title" data-i18n="loc_title">Shop Location & Contact</h2>
+            </div>
+          </div>
+
+          <div class="location-card">
+            <div class="location-details">
+              <h3 class="shop-card-heading">Aakansha Ladies Shop</h3>
+              <p class="address-block" id="fullAddressText">
+                Near Maharashtra Bank, Babhaleshwar,<br />
+                Taluka Rahata, District Ahilyanagar,<br />
+                Maharashtra, India - 413737
+              </p>
+              <p class="pickup-disclaimer" id="pickupPolicyNote">
+                <strong>Store Pickup Only:</strong> All items are reserved for 48 hours upon confirmation for in-person collection at our Babhaleshwar shop. We do not offer home delivery.
+              </p>
+              <p class="phone-status-line" id="configuredPhoneLine"></p>
+
+              <div class="contact-cta-row">
+                <a href="#" id="whatsappActionBtn" target="_blank" rel="noopener noreferrer" class="whatsapp-btn">WhatsApp Shop</a>
+                <a href="#" id="callActionBtn" class="gold-btn">Call Shop</a>
+                <a href="https://www.google.com/maps/search/?api=1&query=Near+Maharashtra+Bank+Babhaleshwar+Rahata+Ahilyanagar+413737" target="_blank" rel="noopener noreferrer" class="outline-btn" id="mapsActionBtn">Google Maps Directions</a>
+              </div>
+            </div>
+
+            <div class="map-frame-box">
+              <iframe
+                title="Aakansha Ladies Shop Location Map"
+                loading="lazy"
+                referrerpolicy="no-referrer-when-downgrade"
+                src="https://www.openstreetmap.org/export/embed.html?bbox=74.3850%2C19.5350%2C74.4350%2C19.5750&layer=mapnik&marker=19.5550%2C74.4100">
+              </iframe>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ================= SEPARATE CATEGORY PAGE VIEW ================= -->
+    <section id="categoryPageView" class="category-page hidden" aria-live="polite">
+      <div class="container">
+        <div class="category-page-topbar">
+          <button type="button" class="outline-btn" id="backToHomeFromCategoryBtn">&#8592; <span data-i18n="back_to_home">Back to Homepage</span></button>
+          <span class="pickup-tag" data-i18n="pickup_tag">In-Store Collection Only • 48h Hold</span>
+        </div>
+
+        <div class="category-hero-banner" id="categoryHeroBanner"></div>
+
+        <div class="category-toolbar">
+          <input type="search" id="categorySearchInput" class="search-input" placeholder="Search products in this category..." />
+          <select id="categorySortSelect" class="sort-select" aria-label="Sort Category Products">
+            <option value="featured" data-i18n="sort_featured">Display Order</option>
+            <option value="price_asc" data-i18n="sort_price_asc">Price: Low to High</option>
+            <option value="price_desc" data-i18n="sort_price_desc">Price: High to Low</option>
+            <option value="stock_desc" data-i18n="sort_stock">Available Stock</option>
+          </select>
+        </div>
+
+        <div class="product-grid" id="categoryProductsGrid"></div>
+      </div>
+    </section>
+
+    <!-- ================= OWNER ADMIN DASHBOARD VIEW ================= -->
+    <section id="ownerDashboardView" class="admin-dashboard hidden" aria-live="polite">
+      <div class="container">
+        <div class="admin-topbar">
+          <div>
+            <p class="section-eyebrow">AUTHENTICATED OWNER DASHBOARD</p>
+            <h2 class="section-title">Aakansha Ladies Shop • Management Suite</h2>
+            <p class="muted-copy" id="activeOwnerSessionBadge"></p>
+          </div>
+          <div class="admin-topbar-actions">
+            <button type="button" class="outline-btn" id="returnToStoreBtn">&#8592; View Customer Storefront</button>
+            <button type="button" class="danger-btn" id="ownerLogoutBtn">Sign Out</button>
+          </div>
+        </div>
+
+        <div class="admin-nav-tabs" id="adminTabsBar" role="tablist">
+          <button type="button" class="admin-tab active" data-tab="overview">Dashboard Overview</button>
+          <button type="button" class="admin-tab" data-tab="products">Product Management</button>
+          <button type="button" class="admin-tab" data-tab="categories">Category Management</button>
+          <button type="button" class="admin-tab" data-tab="banners">Banner Management</button>
+          <button type="button" class="admin-tab" data-tab="arrivals">New Arrivals</button>
+          <button type="button" class="admin-tab" data-tab="stock">Stock Management</button>
+          <button type="button" class="admin-tab" data-tab="reservations">Reservations (48h)</button>
+          <button type="button" class="admin-tab" data-tab="feedback">Customer Feedback</button>
+          <button type="button" class="admin-tab" data-tab="settings">Account & QR Settings</button>
+        </div>
+
+        <div id="adminTabContent" class="admin-tab-panel"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div>
+        <strong>Aakansha Ladies Shop</strong>
+        <p>Near Maharashtra Bank, Babhaleshwar, Tal. Rahata, Dist. Ahilyanagar, Maharashtra - 413737</p>
+        <p class="footer-note">Physical Store Catalogue & 48-Hour In-Store Hold • No Home Delivery</p>
+      </div>
+      <div class="footer-links">
+        <a href="#home">Home</a>
+        <a href="#categories-section">Categories</a>
+        <a href="#wishlist-section">Wishlist</a>
+        <a href="#contact-location-section">Location & Contact</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- SAVE FOR ME / KEEP ASIDE RESERVATION MODAL -->
+  <div id="saveForMeModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="saveModalTitle">
+    <div class="modal-card">
+      <button type="button" class="modal-close" id="closeSaveForMeModal" aria-label="Close modal">&times;</button>
+      <p class="section-eyebrow" data-i18n="save_modal_eyebrow">KEEP ASIDE FOR SHOP PICKUP</p>
+      <h3 id="saveModalTitle" class="modal-title" data-i18n="save_modal_title">Save For Me Request</h3>
+
+      <div class="save-product-preview" id="saveProductPreview"></div>
+
+      <form id="saveForMeForm" class="stack-form">
+        <input type="hidden" id="saveProductId" />
+
+        <div class="form-group">
+          <label for="customerReserveName" data-i18n="lbl_customer_name">Customer Full Name</label>
+          <input type="text" id="customerReserveName" required maxlength="100" placeholder="Enter your full name" />
+        </div>
+
+        <div class="form-group">
+          <label for="customerReservePhone" data-i18n="lbl_mobile_number">Mobile Number</label>
+          <input type="tel" id="customerReservePhone" required pattern="[0-9+\s-]{8,16}" placeholder="10-digit mobile number" />
+        </div>
+
+        <div class="form-group">
+          <label for="customerReserveQty" data-i18n="lbl_requested_qty">Requested Quantity</label>
+          <input type="number" id="customerReserveQty" min="1" value="1" required />
+          <small class="hint-text" id="saveMaxStockHint"></small>
+        </div>
+
+        <p class="modal-policy-note" data-i18n="save_policy_note">
+          Once confirmed by the shop owner, your item is kept aside for 48 hours for in-person collection at Aakansha Ladies Shop, Babhaleshwar. No home delivery.
+        </p>
+
+        <button type="submit" class="gold-btn full-width" data-i18n="btn_submit_save_request">Request to Keep Aside</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- OWNER AUTHENTICATION MODAL (3 ACCOUNTS: FATHER, MOTHER, ME) -->
+  <div id="ownerAuthModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="ownerAuthTitle">
+    <div class="modal-card">
+      <button type="button" class="modal-close" id="closeOwnerAuthModal" aria-label="Close modal">&times;</button>
+      <p class="section-eyebrow">RESTRICTED OWNER PORTAL</p>
+      <h3 id="ownerAuthTitle" class="modal-title">Owner Sign In</h3>
+      <p class="muted-copy">Sign in with your authorized Supabase owner account (<strong>Father</strong>, <strong>Mother</strong>, or <strong>Me</strong>).</p>
+
+      <div class="role-quick-pills" id="ownerRolePills">
+        <button type="button" class="role-pill active" data-role="Father">Father</button>
+        <button type="button" class="role-pill" data-role="Mother">Mother</button>
+        <button type="button" class="role-pill" data-role="Me">Me</button>
+      </div>
+
+      <form id="ownerLoginForm" class="stack-form">
+        <div class="form-group">
+          <label for="ownerEmailInput">Owner Email</label>
+          <input type="email" id="ownerEmailInput" required placeholder="owner@aakanshaladies.in" />
+        </div>
+
+        <div class="form-group">
+          <label for="ownerPasswordInput">Password</label>
+          <input type="password" id="ownerPasswordInput" required placeholder="Enter account password" />
+        </div>
+
+        <button type="submit" class="gold-btn full-width">Sign In to Admin Dashboard</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- OWNER LONG-PRESS / QUICK PRODUCT EDIT MODAL -->
+  <div id="ownerProductModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="ownerProductModalTitle">
+    <div class="modal-card modal-card-wide">
+      <button type="button" class="modal-close" id="closeOwnerProductModal" aria-label="Close modal">&times;</button>
+      <p class="section-eyebrow">OWNER CATALOGUE EDITOR</p>
+      <h3 id="ownerProductModalTitle" class="modal-title">Manage Product</h3>
+      <form id="ownerProductForm" class="stack-form"></form>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toastBanner" class="toast-banner hidden" role="status" aria-live="polite"></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/seed-data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
