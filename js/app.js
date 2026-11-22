@@ -2143,3 +2143,29 @@
   observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
   setTimeout(renderLoggedInCustomersBox, 500);
 })();
+(function () {
+  const showUsers = async () => {
+    const dash = document.getElementById("ownerDashboardView");
+    if (!dash || dash.classList.contains("hidden")) return;
+    const host = document.getElementById("adminTabContent") || dash;
+    if (!host || document.getElementById("myLoginUsersBox")) return;
+
+    const cfg = window.AAKANSHA_CONFIG;
+    if (!cfg?.supabase?.url || !cfg?.supabase?.anonKey || !window.supabase) return;
+    const sb = window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
+    const { data } = await sb.from("customer_accounts").select("user_number,full_name,email,phone,last_login_at").order("last_login_at", { ascending: false });
+
+    const box = document.createElement("div");
+    box.id = "myLoginUsersBox";
+    box.className = "admin-card";
+    box.style.cssText = "border:2px solid var(--gold-500);margin-top:16px;";
+    box.innerHTML = `<h3>Logged-In Users</h3>` + ((!data || !data.length) ? "<p>No users yet.</p>" : data.map((u) => {
+      const t = u.last_login_at ? new Date(u.last_login_at).toLocaleString("en-IN") : "No time";
+      return `<div style="padding:8px 0;border-bottom:1px solid #ddd;"><b>#${u.user_number ?? "?"} — ${u.full_name || ""}</b><br><small>Email: ${u.email || "—"} ${u.phone ? "• " + u.phone : ""}</small><br><small><b>Login Time:</b> ${t}</small></div>`;
+    }).join(""));
+    host.prepend(box);
+  };
+
+  new MutationObserver(() => setTimeout(showUsers, 250)).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  setTimeout(showUsers, 500);
+})();
