@@ -239,7 +239,6 @@
     }
   }
 
-  // BANNER CAROUSEL
   function renderBanners() {
     const track = document.getElementById("bannerTrack");
     const dotsWrap = document.getElementById("bannerDots");
@@ -356,7 +355,6 @@
     });
   }
 
-  // CATEGORIES & SEPARATE CATEGORY PAGE
   function renderCategories() {
     const grid = document.getElementById("categoryGrid");
     const sorted = [...state.categories].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
@@ -453,7 +451,6 @@
     document.getElementById("ownerDashboardView").classList.toggle("hidden", viewName !== "admin");
   }
 
-  // PRODUCT CARDS + NEW ARRIVALS CLICK + OWNER LONG-PRESS
   function sortProducts(list, mode) {
     const copy = [...list];
     if (mode === "price_asc") return copy.sort((a, b) => Number(a.price) - Number(b.price));
@@ -517,7 +514,6 @@
         });
       });
 
-      // Owner-only long-press (Edit / Delete)
       if (authenticatedOwner) {
         let pressTimer = null;
         const startPress = () => {
@@ -550,6 +546,10 @@
   }
 
   function toggleWishlist(prodId) {
+    if (typeof window.__requireCustomerOrRun === "function") {
+      const allowed = window.__requireCustomerOrRun(prodId);
+      if (!allowed) return;
+    }
     if (wishlist.includes(prodId)) {
       wishlist = wishlist.filter((id) => id !== prodId);
       showToast("Removed from Wishlist");
@@ -565,7 +565,6 @@
     document.getElementById("wishlistCountBadge").textContent = String(wishlist.length);
   }
 
-  // SAVE FOR ME MODAL
   function openSaveForMeModal(prodId) {
     const prod = state.products.find((p) => p.id === prodId);
     if (!prod || Number(prod.stock || 0) <= 0) return;
@@ -627,7 +626,6 @@
     showToast("Keep-aside request sent to Aakansha Ladies Shop!");
   }
 
-  // FEEDBACK
   function renderFeedback() {
     const listEl = document.getElementById("feedbackList");
     if (!state.feedback.length) {
@@ -677,7 +675,6 @@
     document.getElementById("ratingReadout").textContent = `${selectedRating} / 5`;
   }
 
-  // OWNER AUTHENTICATION & ADMIN DASHBOARD (3 ACCOUNTS: FATHER, MOTHER, ME)
   function openOwnerPortal() {
     if (authenticatedOwner) {
       showView("admin");
@@ -712,11 +709,6 @@
     showView("admin");
     renderAdminDashboard();
     showToast(`Signed in as ${role}`);
-  }
-
-  function openAdminTab(tabName) {
-    currentAdminTab = tabName;
-    openOwnerPortal();
   }
 
   function renderAdminDashboard() {
@@ -1110,7 +1102,7 @@
     prod.is_new_arrival = checked;
     if (supabaseClient) await supabaseClient.from("products").update({ is_new_arrival: checked }).eq("id", id);
     persistLocalState();
-    renderNewArrivals();
+    renderAll();
     showToast("New Arrival status updated.");
   };
 
@@ -1434,7 +1426,6 @@
 
   setupBannerGestures();
 
-  // First-visit language screen check
   if (!currentLang) {
     document.getElementById("languageOverlay").classList.remove("hidden");
   } else {
@@ -1448,11 +1439,41 @@
   }, 60000);
 })();
 
-/* === OWNER LONG-PRESS CUSTOM HOME BANNER + BANNER LONG-PRESS DELETE + DB SYNC ADD-ON === */
+/* === UNIFIED ADD-ON: HOME BANNER + BANNER LONG-PRESS DELETE + DB SYNC + CUSTOMER LOGIN & MEMBERS === */
 (function () {
-  const modal = document.getElementById("ownerProductModal");
-  const form = document.getElementById("ownerProductForm");
-  if (!modal || !form) return;
+  const STATE_KEY = "aakansha_store_state_v1";
+  const ACTIVE_CUSTOMER_KEY = "aakansha_active_customer_v1";
+  let pendingWishProdId = null;
+
+  function getSb() {
+    const cfg = window.AAKANSHA_CONFIG;
+    if (!cfg?.supabase?.url || !cfg?.supabase?.anonKey || !window.supabase) return null;
+    return window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
+  }
+
+  async function ensureOwnerSession(sb) {
+    if (!sb) return false;
+    const authKey = Object.keys(localStorage).find((k) => k.startsWith("sb-") && k.endsWith("-auth-token"));
+    if (authKey) {
+      try {
+        const parsedAuth = JSON.parse(localStorage.getItem(authKey) || "null");
+        if (parsedAuth?.access_token && parsedAuth?.refresh_token) {
+          await sb.auth.setSession({
+            access_token: parsedAuth.access_token,
+            refresh_token: parsedAuth.refresh_token
+          });
+          return true;
+        }
+      } catch (_) {}
+    }
+    const { data } = await sb.auth.getSession();
+    return Boolean(data?.session);
+  }
+
+  function isOwnerSessionActive() {
+    const txt = (document.getElementById("ownerBtnText")?.textContent || "").toLowerCase();
+    return txt.includes("dashboard") || txt.includes("डॅशबोर्ड") || txt.includes("डैशबोर्ड");
+  }
 
   function compressImageToBlob(file, maxWidth = 1200) {
     return new Promise((resolve) => {
@@ -1473,413 +1494,38 @@
     });
   }
 
-  function getSupabaseWithSession() {
-    const cfg = window.AAKANSHA_CONFIG;
-    if (!cfg?.supabase?.url || !cfg?.supabase?.anonKey || !window.supabase) return null;
-    return window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
-  }
-
-  async function ensureSession(sb) {
-    if (!sb) return false;
-    const authKey = Object.keys(localStorage).find((k) => k.startsWith("sb-") && k.endsWith("-auth-token"));
-    if (authKey) {
-      try {
-        const parsedAuth = JSON.parse(localStorage.getItem(authKey) || "null");
-        if (parsedAuth?.access_token && parsedAuth?.refresh_token) {
-          await sb.auth.setSession({
-            access_token: parsedAuth.access_token,
-            refresh_token: parsedAuth.refresh_token
-          });
-          return true;
-        }
-      } catch (_) {}
-    }
-    const { data } = await sb.auth.getSession();
-    return Boolean(data?.session);
-  }
-
-  async function ensureProductInDb(sb, prod, cat) {
-    if (!sb || !prod || !prod.id) return false;
-    const { data: found } = await sb.from("products").select("id").eq("id", prod.id).maybeSingle();
-    if (found && found.id) return true;
-
-    if (cat && cat.id) {
-      await sb.from("categories").upsert([{
-        id: cat.id,
-        slug: cat.slug || cat.id,
-        name_en: cat.name_en || "Category",
-        name_mr: cat.name_mr || cat.name_en || "विभाग",
-        name_hi: cat.name_hi || cat.name_en || "श्रेणी",
-        image: cat.image || prod.image || "",
-        sort_order: Number(cat.sort_order || 1)
-      }], { onConflict: "id" });
-    }
-
-    const { error } = await sb.from("products").upsert([{
-      id: prod.id,
-      category_id: (cat && cat.id) || prod.category_id || "cat-cosmetics",
-      name_en: prod.name_en || "Product",
-      name_mr: prod.name_mr || prod.name_en || "उत्पादन",
-      name_hi: prod.name_hi || prod.name_en || "उत्पाद",
-      price: Number(prod.price || 0),
-      stock: Number(prod.stock || 0),
-      image: prod.image || "",
-      is_new_arrival: Boolean(prod.is_new_arrival),
-      is_popular: Boolean(prod.is_popular),
-      sort_order: Number(prod.sort_order || 1)
-    }], { onConflict: "id" });
-
-    return !error;
-  }
-
-  // Push newly added products from localStorage to Supabase so other devices (like Papa's phone) see them
-  let syncingNewProd = false;
-  async function syncNewestProductToDb() {
-    if (syncingNewProd) return;
-    syncingNewProd = true;
-    try {
-      const sb = getSupabaseWithSession();
-      const hasSess = await ensureSession(sb);
-      if (!sb || !hasSess) return;
-
-      const raw = localStorage.getItem("aakansha_store_state_v1");
-      if (!raw) return;
-      const storeState = JSON.parse(raw);
-      const prods = Array.isArray(storeState.products) ? storeState.products : [];
-      const cats = Array.isArray(storeState.categories) ? storeState.categories : [];
-      if (!prods.length) return;
-
-      const { data: dbProds } = await sb.from("products").select("id");
-      const dbIds = new Set((dbProds || []).map((r) => r.id));
-
-      for (const p of prods) {
-        if (p && p.id && !dbIds.has(p.id)) {
-          const cat = cats.find((c) => c.id === p.category_id) || null;
-          const ok = await ensureProductInDb(sb, p, cat);
-          if (!ok) {
-            alert("New product DB sync issue for: " + (p.name_en || p.id));
-          }
-        }
-      }
-    } finally {
-      syncingNewProd = false;
-    }
-  }
-
-  function injectHomeBannerOption() {
-    if (!form.querySelector("#editProdEn") || form.querySelector("#openCustomBannerBoxBtn")) return;
-
-    const btnRow = form.querySelector('button[type="submit"]')?.parentElement;
-    if (!btnRow) return;
-
-    const homeBannerBtn = document.createElement("button");
-    homeBannerBtn.type = "button";
-    homeBannerBtn.id = "openCustomBannerBoxBtn";
-    homeBannerBtn.className = "secondary-btn";
-    homeBannerBtn.textContent = "Home Banner";
-    btnRow.insertBefore(homeBannerBtn, btnRow.querySelector("#longPressDeleteBtn") || null);
-
-    const prodNameEn = (form.querySelector("#editProdEn")?.value || "").trim();
-    const bannerBox = document.createElement("div");
-    bannerBox.id = "customHomeBannerBox";
-    bannerBox.className = "hidden";
-    bannerBox.style.cssText = "margin-top:14px;padding:14px;border:1.5px solid var(--gold-500);border-radius:12px;background:var(--cream-100);";
-    bannerBox.innerHTML = `
-      <h4 style="margin:0 0 10px;color:var(--maroon-900);">Add Photo for Homepage Banner</h4>
-      <div class="form-group">
-        <label>Add Photo (Select 50% Discount / Offer photo)</label>
-        <input type="file" id="customBannerFile" accept="image/*" />
-      </div>
-      <div class="form-group" style="margin-top:8px;">
-        <label>Banner Headline</label>
-        <input type="text" id="customBannerTitle" value="${prodNameEn.replace(/"/g, "&quot;")}" />
-      </div>
-      <div class="form-group" style="margin-top:8px;">
-        <label>Banner Subtitle (Optional)</label>
-        <input type="text" id="customBannerSubtitle" placeholder="Tap to view this product" />
-      </div>
-      <button type="button" class="gold-btn full-width" id="publishCustomBannerBtn" style="margin-top:10px;">
-        Publish to Homepage Banner
-      </button>
-    `;
-    form.appendChild(bannerBox);
-
-    homeBannerBtn.addEventListener("click", () => {
-      bannerBox.classList.toggle("hidden");
-    });
-
-    bannerBox.querySelector("#publishCustomBannerBtn").addEventListener("click", async () => {
-      const pubBtn = bannerBox.querySelector("#publishCustomBannerBtn");
-      pubBtn.disabled = true;
-      pubBtn.textContent = "Publishing Banner...";
-
-      try {
-        const stateRaw = localStorage.getItem("aakansha_store_state_v1");
-        const storeState = stateRaw ? JSON.parse(stateRaw) : JSON.parse(JSON.stringify(window.AAKANSHA_SEED));
-        const prod = (storeState.products || []).find((p) => (p.name_en || "").trim() === prodNameEn) || (storeState.products || [])[0];
-        const cat = prod ? (storeState.categories || []).find((c) => c.id === prod.category_id) : null;
-
-        const cfg = window.AAKANSHA_CONFIG;
-        const sb = getSupabaseWithSession();
-        await ensureSession(sb);
-
-        let bannerImg = prod ? prod.image : "";
-        const rawFile = bannerBox.querySelector("#customBannerFile")?.files?.[0];
-
-        if (rawFile && sb) {
-          const compressed = await compressImageToBlob(rawFile, 1200);
-          const path = `banners/ban-${Date.now()}.jpg`;
-          const { error: upErr } = await sb.storage
-            .from(cfg.supabase.storageBucket || "shop-media")
-            .upload(path, compressed, { contentType: "image/jpeg", upsert: true });
-
-          if (!upErr) {
-            const { data } = sb.storage.from(cfg.supabase.storageBucket || "shop-media").getPublicUrl(path);
-            if (data?.publicUrl) bannerImg = data.publicUrl;
-          } else {
-            alert("Photo upload error: " + upErr.message);
-          }
-        }
-
-        const titleText = (bannerBox.querySelector("#customBannerTitle").value || "").trim() || (prod ? prod.name_en : "Special Offer");
-        const subtitleText = (bannerBox.querySelector("#customBannerSubtitle").value || "").trim() ||
-          (prod ? `₹${Number(prod.price || 0).toLocaleString("en-IN")} • Available at Aakansha Ladies Shop` : "Visit Aakansha Ladies Shop");
-
-        const existingBanners = Array.isArray(storeState.banners) ? storeState.banners : [];
-        const maxOrder = existingBanners.reduce((m, b) => Math.max(m, Number(b.sort_order || 0)), 0);
-
-        const localBanner = {
-          id: "ban-" + Date.now(),
-          title_en: titleText,
-          title_mr: titleText,
-          title_hi: titleText,
-          subtitle_en: subtitleText,
-          subtitle_mr: subtitleText,
-          subtitle_hi: subtitleText,
-          image: bannerImg,
-          target_type: "product",
-          target_id: cat ? cat.id : "",
-          product_id: prod ? prod.id : "",
-          sort_order: maxOrder + 1
-        };
-
-        const dbBanner = {
-          id: localBanner.id,
-          title_en: localBanner.title_en,
-          title_mr: localBanner.title_mr,
-          title_hi: localBanner.title_hi,
-          subtitle_en: localBanner.subtitle_en,
-          subtitle_mr: localBanner.subtitle_mr,
-          subtitle_hi: localBanner.subtitle_hi,
-          image: localBanner.image,
-          target_type: localBanner.target_type,
-          target_id: localBanner.target_id,
-          product_id: null,
-          sort_order: localBanner.sort_order
-        };
-
-        if (sb && prod && prod.id) {
-          const synced = await ensureProductInDb(sb, prod, cat);
-          if (synced) {
-            dbBanner.product_id = prod.id;
-          }
-        }
-
-        if (sb) {
-          const { error: dbErr } = await sb.from("banners").insert([dbBanner]);
-          if (dbErr) {
-            alert("Database save error: " + dbErr.message);
-            return;
-          }
-        }
-
-        storeState.banners = [...existingBanners, localBanner];
-        localStorage.setItem("aakansha_store_state_v1", JSON.stringify(storeState));
-
-        modal.classList.add("hidden");
-        window.location.hash = "#home";
-        window.location.reload();
-      } finally {
-        pubBtn.disabled = false;
-        pubBtn.textContent = "Publish to Homepage Banner";
-      }
-    });
-  }
-
-  function bindBannerLongPressDelete() {
-    const track = document.getElementById("bannerTrack");
-    if (!track) return;
-
-    track.querySelectorAll(".banner-slide").forEach((slide) => {
-      if (slide.dataset.longPressBound === "1") return;
-      slide.dataset.longPressBound = "1";
-
-      let timer = null;
-      let longPressed = false;
-
-      const isOwnerLoggedIn = () => {
-        const ownerBtnText = (document.getElementById("ownerBtnText")?.textContent || "").toLowerCase();
-        return ownerBtnText.includes("dashboard") || ownerBtnText.includes("डॅशबोर्ड") || ownerBtnText.includes("डैशबोर्ड");
-      };
-
-      const startTimer = () => {
-        if (!isOwnerLoggedIn()) return;
-        longPressed = false;
-        timer = setTimeout(async () => {
-          longPressed = true;
-          const bannerId = slide.getAttribute("data-banner-id");
-          if (!bannerId) return;
-
-          const ok = confirm("Remove this banner from Homepage?");
-          if (!ok) return;
-
-          const sb = getSupabaseWithSession();
-          const hasSess = await ensureSession(sb);
-          if (sb && hasSess) {
-            const { error } = await sb.from("banners").delete().eq("id", bannerId);
-            if (error) {
-              alert("Could not delete banner: " + error.message);
-              return;
-            }
-          }
-
-          try {
-            const raw = localStorage.getItem("aakansha_store_state_v1");
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              parsed.banners = (parsed.banners || []).filter((b) => b.id !== bannerId);
-              localStorage.setItem("aakansha_store_state_v1", JSON.stringify(parsed));
-            }
-          } catch (_) {}
-
-          window.location.reload();
-        }, 600);
-      };
-
-      const cancelTimer = () => {
-        clearTimeout(timer);
-      };
-
-      slide.addEventListener("mousedown", startTimer);
-      slide.addEventListener("touchstart", startTimer, { passive: true });
-      slide.addEventListener("mouseup", cancelTimer);
-      slide.addEventListener("mouseleave", cancelTimer);
-      slide.addEventListener("touchend", cancelTimer);
-
-      slide.addEventListener("click", (e) => {
-        if (longPressed) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          longPressed = false;
-        }
-      }, true);
-    });
-  }
-
-  const formObserver = new MutationObserver(() => {
-    injectHomeBannerOption();
-    syncNewestProductToDb();
-  });
-  formObserver.observe(form, { childList: true });
-
-  const trackEl = document.getElementById("bannerTrack");
-  if (trackEl) {
-    const trackObserver = new MutationObserver(bindBannerLongPressDelete);
-    trackObserver.observe(trackEl, { childList: true });
-    bindBannerLongPressDelete();
-  }
-
-  setTimeout(syncNewestProductToDb, 1500);
-})();
-/* === OWNER LONG-PRESS CUSTOM HOME BANNER + LIVE MULTI-DEVICE SYNC ADD-ON === */
-(function () {
-  const modal = document.getElementById("ownerProductModal");
-  const form = document.getElementById("ownerProductForm");
-
-  function compressImageToBlob(file, maxWidth = 1200) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        const scale = Math.min(1, maxWidth / img.width);
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        URL.revokeObjectURL(url);
-        canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", 0.82);
-      };
-      img.onerror = () => resolve(file);
-      img.src = url;
-    });
-  }
-
-  function getSupabaseClient() {
-    const cfg = window.AAKANSHA_CONFIG;
-    if (!cfg?.supabase?.url || !cfg?.supabase?.anonKey || !window.supabase) return null;
-    return window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
-  }
-
-  async function ensureSession(sb) {
-    if (!sb) return false;
-    const authKey = Object.keys(localStorage).find((k) => k.startsWith("sb-") && k.endsWith("-auth-token"));
-    if (authKey) {
-      try {
-        const parsedAuth = JSON.parse(localStorage.getItem(authKey) || "null");
-        if (parsedAuth?.access_token && parsedAuth?.refresh_token) {
-          await sb.auth.setSession({
-            access_token: parsedAuth.access_token,
-            refresh_token: parsedAuth.refresh_token
-          });
-          return true;
-        }
-      } catch (_) {}
-    }
-    const { data } = await sb.auth.getSession();
-    return Boolean(data?.session);
-  }
-
+  // 1) Sync store state changes to Supabase so other devices see updates
   let pushTimer = null;
-  let lastSyncedSnapshot = "";
-
-  async function pushStoreStateToSupabase(forceShowError = false) {
-    const raw = localStorage.getItem("aakansha_store_state_v1");
-    if (!raw || raw === lastSyncedSnapshot) return;
-
-    const sb = getSupabaseClient();
-    const hasSess = await ensureSession(sb);
+  let lastSnapshot = "";
+  async function pushStoreStateToSupabase(showErr = false) {
+    const raw = localStorage.getItem(STATE_KEY);
+    if (!raw || raw === lastSnapshot) return;
+    const sb = getSb();
+    const hasSess = await ensureOwnerSession(sb);
     if (!sb || !hasSess) return;
 
     let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (_) {
-      return;
-    }
+    try { parsed = JSON.parse(raw); } catch (_) { return; }
 
     const cats = Array.isArray(parsed.categories) ? parsed.categories : [];
     const prods = Array.isArray(parsed.products) ? parsed.products : [];
 
     if (cats.length) {
-      const catRows = cats.map((c, idx) => ({
+      const catRows = cats.map((c, i) => ({
         id: c.id,
         slug: c.slug || c.id,
         name_en: c.name_en || "Category",
         name_mr: c.name_mr || c.name_en || "विभाग",
         name_hi: c.name_hi || c.name_en || "श्रेणी",
         image: c.image || "",
-        sort_order: Number(c.sort_order ?? idx + 1)
+        sort_order: Number(c.sort_order ?? i + 1)
       }));
       const { error: cErr } = await sb.from("categories").upsert(catRows, { onConflict: "id" });
-      if (cErr && forceShowError) {
-        alert("Category sync error: " + cErr.message);
-        return;
-      }
+      if (cErr && showErr) return alert("Category sync error: " + cErr.message);
     }
 
     if (prods.length) {
-      const prodRows = prods.map((p, idx) => ({
+      const prodRows = prods.map((p, i) => ({
         id: p.id,
         category_id: p.category_id,
         name_en: p.name_en || "Product",
@@ -1890,30 +1536,22 @@
         image: p.image || "",
         is_new_arrival: Boolean(p.is_new_arrival),
         is_popular: Boolean(p.is_popular),
-        sort_order: Number(p.sort_order ?? idx + 1)
+        sort_order: Number(p.sort_order ?? i + 1)
       }));
       const { error: pErr } = await sb.from("products").upsert(prodRows, { onConflict: "id" });
       if (pErr) {
-        if (forceShowError) alert("Product sync error: " + pErr.message);
+        if (showErr) alert("Product sync error: " + pErr.message);
         return;
       }
     }
-
-    lastSyncedSnapshot = raw;
+    lastSnapshot = raw;
   }
 
-  // Hook localStorage.setItem so ANY add/edit/delete of product or category triggers DB sync
-  const origSetItem = localStorage.setItem.bind(localStorage);
-  localStorage.setItem = function (key, value) {
-    origSetItem(key, value);
-    if (key === "aakansha_store_state_v1") {
-      clearTimeout(pushTimer);
-      pushTimer = setTimeout(() => pushStoreStateToSupabase(true), 400);
-    }
-  };
-
+  // 2) Home Banner option inside owner product editor
   function injectHomeBannerOption() {
-    if (!form || !form.querySelector("#editProdEn") || form.querySelector("#openCustomBannerBoxBtn")) return;
+    const modal = document.getElementById("ownerProductModal");
+    const form = document.getElementById("ownerProductForm");
+    if (!modal || !form || !form.querySelector("#editProdEn") || form.querySelector("#openCustomBannerBoxBtn")) return;
 
     const btnRow = form.querySelector('button[type="submit"]')?.parentElement;
     if (!btnRow) return;
@@ -1933,7 +1571,7 @@
     bannerBox.innerHTML = `
       <h4 style="margin:0 0 10px;color:var(--maroon-900);">Add Photo for Homepage Banner</h4>
       <div class="form-group">
-        <label>Add Photo (Select 50% Discount / Offer photo)</label>
+        <label>Add Photo (Offer / Discount photo)</label>
         <input type="file" id="customBannerFile" accept="image/*" />
       </div>
       <div class="form-group" style="margin-top:8px;">
@@ -1950,35 +1588,27 @@
     `;
     form.appendChild(bannerBox);
 
-    homeBannerBtn.addEventListener("click", () => {
-      bannerBox.classList.toggle("hidden");
-    });
+    homeBannerBtn.addEventListener("click", () => bannerBox.classList.toggle("hidden"));
 
     bannerBox.querySelector("#publishCustomBannerBtn").addEventListener("click", async () => {
       const pubBtn = bannerBox.querySelector("#publishCustomBannerBtn");
       pubBtn.disabled = true;
       pubBtn.textContent = "Publishing Banner...";
-
       try {
-        const stateRaw = localStorage.getItem("aakansha_store_state_v1");
-        const storeState = stateRaw ? JSON.parse(stateRaw) : JSON.parse(JSON.stringify(window.AAKANSHA_SEED));
+        const raw = localStorage.getItem(STATE_KEY);
+        const storeState = raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(window.AAKANSHA_SEED));
         const prod = (storeState.products || []).find((p) => (p.name_en || "").trim() === prodNameEn) || (storeState.products || [])[0];
         const cat = prod ? (storeState.categories || []).find((c) => c.id === prod.category_id) : null;
-
         const cfg = window.AAKANSHA_CONFIG;
-        const sb = getSupabaseClient();
-        await ensureSession(sb);
+        const sb = getSb();
+        await ensureOwnerSession(sb);
 
         let bannerImg = prod ? prod.image : "";
-        const rawFile = bannerBox.querySelector("#customBannerFile")?.files?.[0];
-
-        if (rawFile && sb) {
-          const compressed = await compressImageToBlob(rawFile, 1200);
+        const file = bannerBox.querySelector("#customBannerFile")?.files?.[0];
+        if (file && sb) {
+          const blob = await compressImageToBlob(file, 1200);
           const path = `banners/ban-${Date.now()}.jpg`;
-          const { error: upErr } = await sb.storage
-            .from(cfg.supabase.storageBucket || "shop-media")
-            .upload(path, compressed, { contentType: "image/jpeg", upsert: true });
-
+          const { error: upErr } = await sb.storage.from(cfg.supabase.storageBucket || "shop-media").upload(path, blob, { contentType: "image/jpeg", upsert: true });
           if (!upErr) {
             const { data } = sb.storage.from(cfg.supabase.storageBucket || "shop-media").getPublicUrl(path);
             if (data?.publicUrl) bannerImg = data.publicUrl;
@@ -1990,9 +1620,8 @@
         const titleText = (bannerBox.querySelector("#customBannerTitle").value || "").trim() || (prod ? prod.name_en : "Special Offer");
         const subtitleText = (bannerBox.querySelector("#customBannerSubtitle").value || "").trim() ||
           (prod ? `₹${Number(prod.price || 0).toLocaleString("en-IN")} • Available at Aakansha Ladies Shop` : "Visit Aakansha Ladies Shop");
-
-        const existingBanners = Array.isArray(storeState.banners) ? storeState.banners : [];
-        const maxOrder = existingBanners.reduce((m, b) => Math.max(m, Number(b.sort_order || 0)), 0);
+        const existing = Array.isArray(storeState.banners) ? storeState.banners : [];
+        const maxOrder = existing.reduce((m, b) => Math.max(m, Number(b.sort_order || 0)), 0);
 
         const localBanner = {
           id: "ban-" + Date.now(),
@@ -2009,40 +1638,17 @@
           sort_order: maxOrder + 1
         };
 
-        const dbBanner = {
-          id: localBanner.id,
-          title_en: localBanner.title_en,
-          title_mr: localBanner.title_mr,
-          title_hi: localBanner.title_hi,
-          subtitle_en: localBanner.subtitle_en,
-          subtitle_mr: localBanner.subtitle_mr,
-          subtitle_hi: localBanner.subtitle_hi,
-          image: localBanner.image,
-          target_type: localBanner.target_type,
-          target_id: localBanner.target_id,
-          product_id: null,
-          sort_order: localBanner.sort_order
-        };
-
-        if (sb && prod && prod.id) {
+        const dbBanner = { ...localBanner, product_id: null };
+        if (sb && prod?.id) {
           const { data: found } = await sb.from("products").select("id").eq("id", prod.id).maybeSingle();
-          if (found && found.id) {
-            dbBanner.product_id = prod.id;
-          }
-        }
-
-        if (sb) {
+          if (found?.id) dbBanner.product_id = prod.id;
           const { error: dbErr } = await sb.from("banners").insert([dbBanner]);
-          if (dbErr) {
-            alert("Database save error: " + dbErr.message);
-            return;
-          }
+          if (dbErr) return alert("Database save error: " + dbErr.message);
         }
 
-        storeState.banners = [...existingBanners, localBanner];
-        localStorage.setItem("aakansha_store_state_v1", JSON.stringify(storeState));
-
-        if (modal) modal.classList.add("hidden");
+        storeState.banners = [...existing, localBanner];
+        localStorage.setItem(STATE_KEY, JSON.stringify(storeState));
+        modal.classList.add("hidden");
         window.location.hash = "#home";
         window.location.reload();
       } finally {
@@ -2052,6 +1658,7 @@
     });
   }
 
+  // 3) Owner long-press delete on homepage banners
   function bindBannerLongPressDelete() {
     const track = document.getElementById("bannerTrack");
     if (!track) return;
@@ -2063,55 +1670,40 @@
       let timer = null;
       let longPressed = false;
 
-      const isOwnerLoggedIn = () => {
-        const ownerBtnText = (document.getElementById("ownerBtnText")?.textContent || "").toLowerCase();
-        return ownerBtnText.includes("dashboard") || ownerBtnText.includes("डॅशबोर्ड") || ownerBtnText.includes("डैशबोर्ड");
-      };
-
       const startTimer = () => {
-        if (!isOwnerLoggedIn()) return;
+        if (!isOwnerSessionActive()) return;
         longPressed = false;
         timer = setTimeout(async () => {
           longPressed = true;
           const bannerId = slide.getAttribute("data-banner-id");
           if (!bannerId) return;
+          if (!confirm("Remove this banner from Homepage?")) return;
 
-          const ok = confirm("Remove this banner from Homepage?");
-          if (!ok) return;
-
-          const sb = getSupabaseClient();
-          const hasSess = await ensureSession(sb);
+          const sb = getSb();
+          const hasSess = await ensureOwnerSession(sb);
           if (sb && hasSess) {
             const { error } = await sb.from("banners").delete().eq("id", bannerId);
-            if (error) {
-              alert("Could not delete banner: " + error.message);
-              return;
-            }
+            if (error) return alert("Could not delete banner: " + error.message);
           }
 
           try {
-            const raw = localStorage.getItem("aakansha_store_state_v1");
+            const raw = localStorage.getItem(STATE_KEY);
             if (raw) {
               const parsed = JSON.parse(raw);
               parsed.banners = (parsed.banners || []).filter((b) => b.id !== bannerId);
-              localStorage.setItem("aakansha_store_state_v1", JSON.stringify(parsed));
+              localStorage.setItem(STATE_KEY, JSON.stringify(parsed));
             }
           } catch (_) {}
-
           window.location.reload();
         }, 600);
       };
 
-      const cancelTimer = () => {
-        clearTimeout(timer);
-      };
-
+      const cancelTimer = () => clearTimeout(timer);
       slide.addEventListener("mousedown", startTimer);
       slide.addEventListener("touchstart", startTimer, { passive: true });
       slide.addEventListener("mouseup", cancelTimer);
       slide.addEventListener("mouseleave", cancelTimer);
       slide.addEventListener("touchend", cancelTimer);
-
       slide.addEventListener("click", (e) => {
         if (longPressed) {
           e.preventDefault();
@@ -2122,87 +1714,36 @@
     });
   }
 
-  if (form) {
-    const formObserver = new MutationObserver(injectHomeBannerOption);
-    formObserver.observe(form, { childList: true });
-  }
-
-  const trackEl = document.getElementById("bannerTrack");
-  if (trackEl) {
-    const trackObserver = new MutationObserver(bindBannerLongPressDelete);
-    trackObserver.observe(trackEl, { childList: true });
-    bindBannerLongPressDelete();
-  }
-
-  setTimeout(() => pushStoreStateToSupabase(false), 1200);
-})();
-/* === CUSTOMER LOGIN (NAME + PHONE/OTP + GMAIL) + USER NUMBER + PER-USER WISHLIST === */
-(function () {
-  const STORAGE_KEY = "aakansha_store_state_v1";
-  const ACTIVE_CUSTOMER_KEY = "aakansha_active_customer_v1";
-
-  function getSb() {
-    const cfg = window.AAKANSHA_CONFIG;
-    if (!cfg?.supabase?.url || !cfg?.supabase?.anonKey || !window.supabase) return null;
-    return window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
-  }
-
+  // 4) Customer Login + User Number + Per-User Wishlist
   function normalizeCustomerKey(phone, email) {
-    const cleanPhone = (phone || "").replace(/\D/g, "").slice(-10);
-    const cleanEmail = (email || "").trim().toLowerCase();
-    if (cleanPhone.length >= 10) return "phone:" + cleanPhone;
-    if (cleanEmail) return "email:" + cleanEmail;
+    const p = (phone || "").replace(/\D/g, "").slice(-10);
+    const e = (email || "").trim().toLowerCase();
+    if (p.length >= 10) return "phone:" + p;
+    if (e) return "email:" + e;
     return "";
   }
 
   function getActiveCustomer() {
-    try {
-      const raw = localStorage.getItem(ACTIVE_CUSTOMER_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (_) {
-      return null;
-    }
+    try { return JSON.parse(localStorage.getItem(ACTIVE_CUSTOMER_KEY) || "null"); } catch (_) { return null; }
   }
 
-  function setActiveCustomer(cust) {
-    if (!cust) {
-      localStorage.removeItem(ACTIVE_CUSTOMER_KEY);
-      return;
-    }
-    localStorage.setItem(ACTIVE_CUSTOMER_KEY, JSON.stringify(cust));
+  function setActiveCustomer(c) {
+    if (!c) localStorage.removeItem(ACTIVE_CUSTOMER_KEY);
+    else localStorage.setItem(ACTIVE_CUSTOMER_KEY, JSON.stringify(c));
   }
 
-  function getStoreState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(window.AAKANSHA_SEED || { wishlist: [] }));
-    } catch (_) {
-      return { wishlist: [] };
-    }
-  }
-
-  function saveStoreState(st) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
-  }
-
-  function getCustomerLocalWishlist(key) {
+  function getCustomerWl(key) {
     if (!key) return [];
-    try {
-      const raw = localStorage.getItem("aakansha_wl_" + key);
-      return raw ? JSON.parse(raw) : [];
-    } catch (_) {
-      return [];
-    }
+    try { return JSON.parse(localStorage.getItem("aakansha_wl_" + key) || "[]"); } catch (_) { return []; }
   }
 
-  function setCustomerLocalWishlist(key, list) {
+  function setCustomerWl(key, list) {
     if (!key) return;
     localStorage.setItem("aakansha_wl_" + key, JSON.stringify(Array.isArray(list) ? list : []));
   }
 
   function ensureCustomerModal() {
     if (document.getElementById("customerAccountModal")) return;
-
     const modal = document.createElement("div");
     modal.id = "customerAccountModal";
     modal.className = "modal-backdrop hidden";
@@ -2211,52 +1752,40 @@
       <div style="background:#fffaf4;color:#2a0812;border:2px solid #c99b3c;border-radius:16px;max-width:430px;width:100%;padding:20px;box-shadow:0 14px 36px rgba(0,0,0,0.35);position:relative;">
         <button type="button" id="closeCustomerModalBtn" style="position:absolute;top:12px;right:14px;background:transparent;border:none;font-size:1.3rem;cursor:pointer;color:#4a0d1d;">✕</button>
         <div id="customerStatusBanner" style="display:none;background:#f7ebd2;border:1px solid #c99b3c;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:0.9rem;"></div>
-        <h3 style="margin:0 0 6px;color:#4a0d1d;">Customer Login / Profile</h3>
+        <h3 style="margin:0 0 6px;color:#4a0d1d;">Customer Login</h3>
         <p style="margin:0 0 14px;font-size:0.85rem;color:#5c2b38;">
-          Login with Mobile Number (OTP) or Gmail so your Wishlist stays private & saved for you.
+          Enter Name and Mobile Number (OTP) or Gmail. Your wishlist stays saved to your account.
         </p>
-
         <div style="margin-bottom:10px;">
-          <label style="display:block;font-size:0.82rem;font-weight:600;margin-bottom:4px;">Full Name *</label>
+          <label style="display:block;font-size:0.82rem;font-weight:600;margin-bottom:4px;">Your Name *</label>
           <input type="text" id="custNameInput" placeholder="Enter your name" style="width:100%;padding:9px 11px;border:1px solid #c9b59b;border-radius:8px;box-sizing:border-box;" />
         </div>
-
         <div style="margin-bottom:10px;">
           <label style="display:block;font-size:0.82rem;font-weight:600;margin-bottom:4px;">Mobile Number (10 digits)</label>
           <div style="display:flex;gap:8px;">
             <input type="tel" id="custPhoneInput" maxlength="10" placeholder="9876543210" style="flex:1;padding:9px 11px;border:1px solid #c9b59b;border-radius:8px;box-sizing:border-box;" />
-            <button type="button" id="sendCustOtpBtn" style="padding:9px 12px;border-radius:8px;border:1px solid #4a0d1d;background:#fff;color:#4a0d1d;font-weight:600;cursor:pointer;white-space:nowrap;">
-              Send OTP
-            </button>
+            <button type="button" id="sendCustOtpBtn" style="padding:9px 12px;border-radius:8px;border:1px solid #4a0d1d;background:#fff;color:#4a0d1d;font-weight:600;cursor:pointer;white-space:nowrap;">Send OTP</button>
           </div>
         </div>
-
         <div id="custOtpSection" style="display:none;margin-bottom:10px;background:#fff3dc;padding:10px;border-radius:8px;border:1px dashed #c99b3c;">
           <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:4px;">
             Enter 4-digit OTP <span id="custOtpHint" style="color:#7a1c32;"></span>
           </label>
           <input type="text" id="custOtpInput" maxlength="4" placeholder="4-digit OTP" style="width:100%;padding:8px 10px;border:1px solid #c9b59b;border-radius:8px;box-sizing:border-box;" />
         </div>
-
         <div style="margin-bottom:14px;">
           <label style="display:block;font-size:0.82rem;font-weight:600;margin-bottom:4px;">Gmail / Email</label>
           <input type="email" id="custEmailInput" placeholder="yourname@gmail.com" style="width:100%;padding:9px 11px;border:1px solid #c9b59b;border-radius:8px;box-sizing:border-box;" />
         </div>
-
         <div style="display:flex;gap:10px;">
-          <button type="button" id="saveCustomerLoginBtn" style="flex:1;padding:10px 14px;border-radius:10px;border:none;background:#5c0f24;color:#fff7e8;font-weight:700;cursor:pointer;">
-            Login & Save My List
-          </button>
-          <button type="button" id="logoutCustomerBtn" style="display:none;padding:10px 12px;border-radius:10px;border:1px solid #5c0f24;background:transparent;color:#5c0f24;font-weight:600;cursor:pointer;">
-            Logout
-          </button>
+          <button type="button" id="saveCustomerLoginBtn" style="flex:1;padding:10px 14px;border-radius:10px;border:none;background:#5c0f24;color:#fff7e8;font-weight:700;cursor:pointer;">Login & Continue</button>
+          <button type="button" id="logoutCustomerBtn" style="display:none;padding:10px 12px;border-radius:10px;border:1px solid #5c0f24;background:transparent;color:#5c0f24;font-weight:600;cursor:pointer;">Logout</button>
         </div>
       </div>
     `;
     document.body.appendChild(modal);
 
-    let generatedOtp = "";
-
+    let otpCode = "";
     const openModal = () => {
       const cur = getActiveCustomer();
       const banner = document.getElementById("customerStatusBanner");
@@ -2266,9 +1795,9 @@
       document.getElementById("custEmailInput").value = cur?.email || "";
       document.getElementById("custOtpInput").value = "";
       document.getElementById("custOtpSection").style.display = "none";
-      generatedOtp = "";
+      otpCode = "";
 
-      if (cur && cur.customer_key) {
+      if (cur?.customer_key) {
         banner.style.display = "block";
         banner.innerHTML = `<strong>You are User #${cur.user_number || "?"}</strong> of Aakansha Ladies Shop<br/>Name: <b>${cur.full_name}</b> • ${cur.phone || ""} ${cur.email ? "• " + cur.email : ""}`;
         logoutBtn.style.display = "inline-block";
@@ -2276,7 +1805,6 @@
         banner.style.display = "none";
         logoutBtn.style.display = "none";
       }
-
       modal.classList.remove("hidden");
       modal.style.display = "flex";
     };
@@ -2287,22 +1815,16 @@
     };
 
     window.openCustomerLoginModal = openModal;
-
     document.getElementById("closeCustomerModalBtn").addEventListener("click", closeModal);
-    modal.addEventListener("click", (e) => {
-      if (e.target === modal) closeModal();
-    });
+    modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
 
     document.getElementById("sendCustOtpBtn").addEventListener("click", () => {
       const phone = (document.getElementById("custPhoneInput").value || "").replace(/\D/g, "").slice(-10);
-      if (phone.length < 10) {
-        alert("Please enter a valid 10-digit mobile number.");
-        return;
-      }
-      generatedOtp = String(Math.floor(1000 + Math.random() * 9000));
+      if (phone.length < 10) return alert("Please enter a valid 10-digit mobile number.");
+      otpCode = String(Math.floor(1000 + Math.random() * 9000));
       document.getElementById("custOtpSection").style.display = "block";
-      document.getElementById("custOtpHint").textContent = `(Demo OTP: ${generatedOtp})`;
-      alert("OTP sent to " + phone + ": " + generatedOtp);
+      document.getElementById("custOtpHint").textContent = `(OTP: ${otpCode})`;
+      alert("OTP sent to " + phone + ": " + otpCode);
     });
 
     document.getElementById("saveCustomerLoginBtn").addEventListener("click", async () => {
@@ -2311,19 +1833,10 @@
       const email = (document.getElementById("custEmailInput").value || "").trim().toLowerCase();
       const enteredOtp = (document.getElementById("custOtpInput").value || "").trim();
 
-      if (!fullName) {
-        alert("Please enter your name.");
-        return;
-      }
+      if (!fullName) return alert("Please enter your name.");
       const key = normalizeCustomerKey(phone, email);
-      if (!key) {
-        alert("Please enter either a 10-digit Mobile Number or Gmail.");
-        return;
-      }
-      if (generatedOtp && enteredOtp !== generatedOtp) {
-        alert("Invalid OTP. Please enter: " + generatedOtp);
-        return;
-      }
+      if (!key) return alert("Please enter either a Mobile Number or Gmail.");
+      if (otpCode && enteredOtp !== otpCode) return alert("Invalid OTP. Please enter: " + otpCode);
 
       const sb = getSb();
       let userNumber = null;
@@ -2338,148 +1851,165 @@
           last_login_at: new Date().toISOString()
         }], { onConflict: "customer_key" });
 
-        const { data: acc } = await sb
-          .from("customer_accounts")
-          .select("user_number, full_name, phone, email")
-          .eq("customer_key", key)
-          .maybeSingle();
-
+        const { data: acc } = await sb.from("customer_accounts").select("user_number").eq("customer_key", key).maybeSingle();
         if (acc?.user_number) userNumber = acc.user_number;
 
-        const { data: wlRow } = await sb
-          .from("customer_wishlists")
-          .select("items")
-          .eq("customer_key", key)
-          .maybeSingle();
-
-        if (wlRow && Array.isArray(wlRow.items)) {
-          dbItems = wlRow.items;
-        }
+        const { data: wlRow } = await sb.from("customer_wishlists").select("items").eq("customer_key", key).maybeSingle();
+        if (wlRow && Array.isArray(wlRow.items)) dbItems = wlRow.items;
       }
 
       if (!userNumber) {
-        const idxMapRaw = localStorage.getItem("aakansha_user_seq_v1");
-        const idxMap = idxMapRaw ? JSON.parse(idxMapRaw) : {};
-        if (!idxMap[key]) {
-          idxMap[key] = Object.keys(idxMap).length + 1;
-          localStorage.setItem("aakansha_user_seq_v1", JSON.stringify(idxMap));
+        const seqMap = JSON.parse(localStorage.getItem("aakansha_user_seq_v1") || "{}");
+        if (!seqMap[key]) {
+          seqMap[key] = Object.keys(seqMap).length + 1;
+          localStorage.setItem("aakansha_user_seq_v1", JSON.stringify(seqMap));
         }
-        userNumber = idxMap[key];
+        userNumber = seqMap[key];
       }
 
-      const customerObj = {
-        customer_key: key,
-        user_number: userNumber,
-        full_name: fullName,
-        phone,
-        email
-      };
-      setActiveCustomer(customerObj);
+      setActiveCustomer({ customer_key: key, user_number: userNumber, full_name: fullName, phone, email });
+      const merged = dbItems !== null ? [...dbItems] : [...getCustomerWl(key)];
+      if (pendingWishProdId && !merged.includes(pendingWishProdId)) {
+        merged.push(pendingWishProdId);
+      }
+      pendingWishProdId = null;
 
-      const finalWishlist = dbItems !== null ? dbItems : getCustomerLocalWishlist(key);
-      setCustomerLocalWishlist(key, finalWishlist);
+      setCustomerWl(key, merged);
+      localStorage.setItem("aakansha_wishlist_v1", JSON.stringify(merged));
+      if (sb) {
+        await sb.from("customer_wishlists").upsert([{
+          customer_key: key,
+          items: merged,
+          updated_at: new Date().toISOString()
+        }], { onConflict: "customer_key" });
+      }
 
-      const st = getStoreState();
-      st.wishlist = finalWishlist;
-      saveStoreState(st);
-
+      alert(`Welcome ${fullName}! You are User #${userNumber} of Aakansha Ladies Shop.`);
       closeModal();
       window.location.reload();
     });
 
     document.getElementById("logoutCustomerBtn").addEventListener("click", () => {
+      pendingWishProdId = null;
       setActiveCustomer(null);
-      const st = getStoreState();
-      st.wishlist = [];
-      saveStoreState(st);
+      localStorage.setItem("aakansha_wishlist_v1", "[]");
       closeModal();
       window.location.reload();
     });
   }
 
-  function injectCustomerHeaderButton() {
+  window.__requireCustomerOrRun = function (prodId) {
+    const cur = getActiveCustomer();
+    if (cur && cur.customer_key) return true;
+    pendingWishProdId = prodId || null;
+    ensureCustomerModal();
+    window.openCustomerLoginModal && window.openCustomerLoginModal();
+    return false;
+  };
+
+  function injectCustomerHeaderBtn() {
     ensureCustomerModal();
     if (document.getElementById("customerAccountBtn")) return;
-
-    const ownerBtn = document.getElementById("ownerLoginBtn");
-    const targetParent = ownerBtn?.parentElement || document.querySelector("header .header-actions, header nav, header");
-    if (!targetParent) return;
+    const ownerBtn = document.getElementById("openOwnerPortalBtn");
+    const parent = ownerBtn?.parentElement || document.querySelector("header");
+    if (!parent) return;
 
     const cur = getActiveCustomer();
     const btn = document.createElement("button");
     btn.type = "button";
     btn.id = "customerAccountBtn";
-    btn.className = "secondary-btn";
-    btn.style.cssText = "margin-right:8px;padding:6px 12px;border-radius:999px;font-size:0.8rem;cursor:pointer;";
-    btn.textContent = cur
-      ? `${cur.full_name} (#${cur.user_number || "?"})`
-      : "Customer Login";
-
+    btn.className = "outline-btn";
+    btn.textContent = cur ? `${cur.full_name} (#${cur.user_number || "?"})` : "Customer Login";
     btn.addEventListener("click", () => window.openCustomerLoginModal && window.openCustomerLoginModal());
 
-    if (ownerBtn && ownerBtn.parentElement === targetParent) {
-      targetParent.insertBefore(btn, ownerBtn);
-    } else {
-      targetParent.appendChild(btn);
-    }
+    if (ownerBtn && ownerBtn.parentElement === parent) parent.insertBefore(btn, ownerBtn);
+    else parent.appendChild(btn);
   }
 
-  // Isolate wishlist per logged-in customer and sync to Supabase
-  let lastSyncedWlKey = "";
-  let lastSyncedWlJson = "";
+  // 5) Owner-only Members list inside Owner Dashboard
+  async function injectOwnerMembersSection() {
+    const dash = document.getElementById("ownerDashboardView");
+    if (!dash || dash.classList.contains("hidden") || !isOwnerSessionActive()) return;
+    if (dash.querySelector("#ownerCustomerMembersBox")) return;
 
-  async function syncCustomerWishlist() {
-    const cur = getActiveCustomer();
-    const st = getStoreState();
-    const currentList = Array.isArray(st.wishlist) ? st.wishlist : [];
+    const box = document.createElement("div");
+    box.id = "ownerCustomerMembersBox";
+    box.className = "admin-card";
+    box.innerHTML = `<h3>Registered Customers (Owner Only)</h3><div id="ownerMembersList">Loading members...</div>`;
+    dash.appendChild(box);
 
-    if (!cur || !cur.customer_key) {
-      // Guest user: do not expose another user's wishlist
-      if (currentList.length > 0) {
-        st.wishlist = [];
-        saveStoreState(st);
-      }
+    const sb = getSb();
+    let rows = [];
+    if (sb) {
+      const { data } = await sb.from("customer_accounts").select("user_number, full_name, phone, email").order("user_number", { ascending: true });
+      if (Array.isArray(data)) rows = data;
+    }
+
+    const listEl = box.querySelector("#ownerMembersList");
+    if (!rows.length) {
+      listEl.innerHTML = `<p class="muted-copy">No customers logged in yet.</p>`;
       return;
     }
 
-    setCustomerLocalWishlist(cur.customer_key, currentList);
-    const snap = JSON.stringify(currentList);
-    if (cur.customer_key === lastSyncedWlKey && snap === lastSyncedWlJson) return;
-
-    const sb = getSb();
-    if (sb) {
-      await sb.from("customer_wishlists").upsert([{
-        customer_key: cur.customer_key,
-        items: currentList,
-        updated_at: new Date().toISOString()
-      }], { onConflict: "customer_key" });
-    }
-
-    lastSyncedWlKey = cur.customer_key;
-    lastSyncedWlJson = snap;
+    listEl.innerHTML = `
+      <p style="margin:0 0 8px;font-weight:700;">Total Members: ${rows.length}</p>
+      <div style="max-height:220px;overflow:auto;">
+        ${rows.map((r) => `
+          <div style="padding:8px 0;border-bottom:1px solid var(--border-soft);">
+            <strong>#${r.user_number} — ${r.full_name}</strong><br/>
+            <small>${r.phone ? "📞 " + r.phone : ""} ${r.email ? "• ✉️ " + r.email : ""}</small>
+          </div>
+        `).join("")}
+      </div>
+    `;
   }
 
   const origSetItem = localStorage.setItem.bind(localStorage);
   localStorage.setItem = function (key, value) {
     origSetItem(key, value);
-    if (key === STORAGE_KEY) {
-      setTimeout(syncCustomerWishlist, 150);
+    if (key === STATE_KEY) {
+      clearTimeout(pushTimer);
+      pushTimer = setTimeout(() => pushStoreStateToSupabase(true), 400);
+    } else if (key === "aakansha_wishlist_v1") {
+      const cur = getActiveCustomer();
+      if (cur?.customer_key) {
+        let arr = [];
+        try { arr = JSON.parse(value || "[]"); } catch (_) {}
+        setCustomerWl(cur.customer_key, arr);
+        const sb = getSb();
+        if (sb) {
+          sb.from("customer_wishlists").upsert([{
+            customer_key: cur.customer_key,
+            items: arr,
+            updated_at: new Date().toISOString()
+          }], { onConflict: "customer_key" }).then(() => {});
+        }
+      }
     }
   };
 
   setTimeout(() => {
-    injectCustomerHeaderButton();
     const cur = getActiveCustomer();
-    if (cur && cur.customer_key) {
-      const st = getStoreState();
-      const saved = getCustomerLocalWishlist(cur.customer_key);
-      if (JSON.stringify(st.wishlist || []) !== JSON.stringify(saved)) {
-        st.wishlist = saved;
-        saveStoreState(st);
-      }
+    if (cur?.customer_key) {
+      const saved = getCustomerWl(cur.customer_key);
+      origSetItem("aakansha_wishlist_v1", JSON.stringify(saved));
+    } else {
+      origSetItem("aakansha_wishlist_v1", "[]");
     }
-  }, 400);
+    injectCustomerHeaderBtn();
+    bindBannerLongPressDelete();
+    injectOwnerMembersSection();
+    pushStoreStateToSupabase(false);
+  }, 450);
 
-  const bodyObs = new MutationObserver(() => injectCustomerHeaderButton());
-  bodyObs.observe(document.body, { childList: true, subtree: true });
+  const formEl = document.getElementById("ownerProductForm");
+  if (formEl) new MutationObserver(injectHomeBannerOption).observe(formEl, { childList: true });
+
+  const trackEl = document.getElementById("bannerTrack");
+  if (trackEl) new MutationObserver(bindBannerLongPressDelete).observe(trackEl, { childList: true });
+
+  new MutationObserver(() => {
+    injectCustomerHeaderBtn();
+    injectOwnerMembersSection();
+  }).observe(document.body, { childList: true, subtree: true });
 })();
