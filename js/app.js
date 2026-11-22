@@ -2136,3 +2136,350 @@
 
   setTimeout(() => pushStoreStateToSupabase(false), 1200);
 })();
+/* === CUSTOMER LOGIN (NAME + PHONE/OTP + GMAIL) + USER NUMBER + PER-USER WISHLIST === */
+(function () {
+  const STORAGE_KEY = "aakansha_store_state_v1";
+  const ACTIVE_CUSTOMER_KEY = "aakansha_active_customer_v1";
+
+  function getSb() {
+    const cfg = window.AAKANSHA_CONFIG;
+    if (!cfg?.supabase?.url || !cfg?.supabase?.anonKey || !window.supabase) return null;
+    return window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
+  }
+
+  function normalizeCustomerKey(phone, email) {
+    const cleanPhone = (phone || "").replace(/\D/g, "").slice(-10);
+    const cleanEmail = (email || "").trim().toLowerCase();
+    if (cleanPhone.length >= 10) return "phone:" + cleanPhone;
+    if (cleanEmail) return "email:" + cleanEmail;
+    return "";
+  }
+
+  function getActiveCustomer() {
+    try {
+      const raw = localStorage.getItem(ACTIVE_CUSTOMER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function setActiveCustomer(cust) {
+    if (!cust) {
+      localStorage.removeItem(ACTIVE_CUSTOMER_KEY);
+      return;
+    }
+    localStorage.setItem(ACTIVE_CUSTOMER_KEY, JSON.stringify(cust));
+  }
+
+  function getStoreState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(window.AAKANSHA_SEED || { wishlist: [] }));
+    } catch (_) {
+      return { wishlist: [] };
+    }
+  }
+
+  function saveStoreState(st) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+  }
+
+  function getCustomerLocalWishlist(key) {
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem("aakansha_wl_" + key);
+      return raw ? JSON.parse(raw) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function setCustomerLocalWishlist(key, list) {
+    if (!key) return;
+    localStorage.setItem("aakansha_wl_" + key, JSON.stringify(Array.isArray(list) ? list : []));
+  }
+
+  function ensureCustomerModal() {
+    if (document.getElementById("customerAccountModal")) return;
+
+    const modal = document.createElement("div");
+    modal.id = "customerAccountModal";
+    modal.className = "modal-backdrop hidden";
+    modal.style.cssText = "position:fixed;inset:0;background:rgba(20,4,10,0.65);display:none;align-items:center;justify-content:center;z-index:9999;padding:16px;";
+    modal.innerHTML = `
+      <div style="background:#fffaf4;color:#2a0812;border:2px solid #c99b3c;border-radius:16px;max-width:430px;width:100%;padding:20px;box-shadow:0 14px 36px rgba(0,0,0,0.35);position:relative;">
+        <button type="button" id="closeCustomerModalBtn" style="position:absolute;top:12px;right:14px;background:transparent;border:none;font-size:1.3rem;cursor:pointer;color:#4a0d1d;">✕</button>
+        <div id="customerStatusBanner" style="display:none;background:#f7ebd2;border:1px solid #c99b3c;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:0.9rem;"></div>
+        <h3 style="margin:0 0 6px;color:#4a0d1d;">Customer Login / Profile</h3>
+        <p style="margin:0 0 14px;font-size:0.85rem;color:#5c2b38;">
+          Login with Mobile Number (OTP) or Gmail so your Wishlist stays private & saved for you.
+        </p>
+
+        <div style="margin-bottom:10px;">
+          <label style="display:block;font-size:0.82rem;font-weight:600;margin-bottom:4px;">Full Name *</label>
+          <input type="text" id="custNameInput" placeholder="Enter your name" style="width:100%;padding:9px 11px;border:1px solid #c9b59b;border-radius:8px;box-sizing:border-box;" />
+        </div>
+
+        <div style="margin-bottom:10px;">
+          <label style="display:block;font-size:0.82rem;font-weight:600;margin-bottom:4px;">Mobile Number (10 digits)</label>
+          <div style="display:flex;gap:8px;">
+            <input type="tel" id="custPhoneInput" maxlength="10" placeholder="9876543210" style="flex:1;padding:9px 11px;border:1px solid #c9b59b;border-radius:8px;box-sizing:border-box;" />
+            <button type="button" id="sendCustOtpBtn" style="padding:9px 12px;border-radius:8px;border:1px solid #4a0d1d;background:#fff;color:#4a0d1d;font-weight:600;cursor:pointer;white-space:nowrap;">
+              Send OTP
+            </button>
+          </div>
+        </div>
+
+        <div id="custOtpSection" style="display:none;margin-bottom:10px;background:#fff3dc;padding:10px;border-radius:8px;border:1px dashed #c99b3c;">
+          <label style="display:block;font-size:0.8rem;font-weight:600;margin-bottom:4px;">
+            Enter 4-digit OTP <span id="custOtpHint" style="color:#7a1c32;"></span>
+          </label>
+          <input type="text" id="custOtpInput" maxlength="4" placeholder="4-digit OTP" style="width:100%;padding:8px 10px;border:1px solid #c9b59b;border-radius:8px;box-sizing:border-box;" />
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:0.82rem;font-weight:600;margin-bottom:4px;">Gmail / Email</label>
+          <input type="email" id="custEmailInput" placeholder="yourname@gmail.com" style="width:100%;padding:9px 11px;border:1px solid #c9b59b;border-radius:8px;box-sizing:border-box;" />
+        </div>
+
+        <div style="display:flex;gap:10px;">
+          <button type="button" id="saveCustomerLoginBtn" style="flex:1;padding:10px 14px;border-radius:10px;border:none;background:#5c0f24;color:#fff7e8;font-weight:700;cursor:pointer;">
+            Login & Save My List
+          </button>
+          <button type="button" id="logoutCustomerBtn" style="display:none;padding:10px 12px;border-radius:10px;border:1px solid #5c0f24;background:transparent;color:#5c0f24;font-weight:600;cursor:pointer;">
+            Logout
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    let generatedOtp = "";
+
+    const openModal = () => {
+      const cur = getActiveCustomer();
+      const banner = document.getElementById("customerStatusBanner");
+      const logoutBtn = document.getElementById("logoutCustomerBtn");
+      document.getElementById("custNameInput").value = cur?.full_name || "";
+      document.getElementById("custPhoneInput").value = cur?.phone || "";
+      document.getElementById("custEmailInput").value = cur?.email || "";
+      document.getElementById("custOtpInput").value = "";
+      document.getElementById("custOtpSection").style.display = "none";
+      generatedOtp = "";
+
+      if (cur && cur.customer_key) {
+        banner.style.display = "block";
+        banner.innerHTML = `<strong>You are User #${cur.user_number || "?"}</strong> of Aakansha Ladies Shop<br/>Name: <b>${cur.full_name}</b> • ${cur.phone || ""} ${cur.email ? "• " + cur.email : ""}`;
+        logoutBtn.style.display = "inline-block";
+      } else {
+        banner.style.display = "none";
+        logoutBtn.style.display = "none";
+      }
+
+      modal.classList.remove("hidden");
+      modal.style.display = "flex";
+    };
+
+    const closeModal = () => {
+      modal.classList.add("hidden");
+      modal.style.display = "none";
+    };
+
+    window.openCustomerLoginModal = openModal;
+
+    document.getElementById("closeCustomerModalBtn").addEventListener("click", closeModal);
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeModal();
+    });
+
+    document.getElementById("sendCustOtpBtn").addEventListener("click", () => {
+      const phone = (document.getElementById("custPhoneInput").value || "").replace(/\D/g, "").slice(-10);
+      if (phone.length < 10) {
+        alert("Please enter a valid 10-digit mobile number.");
+        return;
+      }
+      generatedOtp = String(Math.floor(1000 + Math.random() * 9000));
+      document.getElementById("custOtpSection").style.display = "block";
+      document.getElementById("custOtpHint").textContent = `(Demo OTP: ${generatedOtp})`;
+      alert("OTP sent to " + phone + ": " + generatedOtp);
+    });
+
+    document.getElementById("saveCustomerLoginBtn").addEventListener("click", async () => {
+      const fullName = (document.getElementById("custNameInput").value || "").trim();
+      const phone = (document.getElementById("custPhoneInput").value || "").replace(/\D/g, "").slice(-10);
+      const email = (document.getElementById("custEmailInput").value || "").trim().toLowerCase();
+      const enteredOtp = (document.getElementById("custOtpInput").value || "").trim();
+
+      if (!fullName) {
+        alert("Please enter your name.");
+        return;
+      }
+      const key = normalizeCustomerKey(phone, email);
+      if (!key) {
+        alert("Please enter either a 10-digit Mobile Number or Gmail.");
+        return;
+      }
+      if (generatedOtp && enteredOtp !== generatedOtp) {
+        alert("Invalid OTP. Please enter: " + generatedOtp);
+        return;
+      }
+
+      const sb = getSb();
+      let userNumber = null;
+      let dbItems = null;
+
+      if (sb) {
+        await sb.from("customer_accounts").upsert([{
+          customer_key: key,
+          full_name: fullName,
+          phone: phone || null,
+          email: email || null,
+          last_login_at: new Date().toISOString()
+        }], { onConflict: "customer_key" });
+
+        const { data: acc } = await sb
+          .from("customer_accounts")
+          .select("user_number, full_name, phone, email")
+          .eq("customer_key", key)
+          .maybeSingle();
+
+        if (acc?.user_number) userNumber = acc.user_number;
+
+        const { data: wlRow } = await sb
+          .from("customer_wishlists")
+          .select("items")
+          .eq("customer_key", key)
+          .maybeSingle();
+
+        if (wlRow && Array.isArray(wlRow.items)) {
+          dbItems = wlRow.items;
+        }
+      }
+
+      if (!userNumber) {
+        const idxMapRaw = localStorage.getItem("aakansha_user_seq_v1");
+        const idxMap = idxMapRaw ? JSON.parse(idxMapRaw) : {};
+        if (!idxMap[key]) {
+          idxMap[key] = Object.keys(idxMap).length + 1;
+          localStorage.setItem("aakansha_user_seq_v1", JSON.stringify(idxMap));
+        }
+        userNumber = idxMap[key];
+      }
+
+      const customerObj = {
+        customer_key: key,
+        user_number: userNumber,
+        full_name: fullName,
+        phone,
+        email
+      };
+      setActiveCustomer(customerObj);
+
+      const finalWishlist = dbItems !== null ? dbItems : getCustomerLocalWishlist(key);
+      setCustomerLocalWishlist(key, finalWishlist);
+
+      const st = getStoreState();
+      st.wishlist = finalWishlist;
+      saveStoreState(st);
+
+      closeModal();
+      window.location.reload();
+    });
+
+    document.getElementById("logoutCustomerBtn").addEventListener("click", () => {
+      setActiveCustomer(null);
+      const st = getStoreState();
+      st.wishlist = [];
+      saveStoreState(st);
+      closeModal();
+      window.location.reload();
+    });
+  }
+
+  function injectCustomerHeaderButton() {
+    ensureCustomerModal();
+    if (document.getElementById("customerAccountBtn")) return;
+
+    const ownerBtn = document.getElementById("ownerLoginBtn");
+    const targetParent = ownerBtn?.parentElement || document.querySelector("header .header-actions, header nav, header");
+    if (!targetParent) return;
+
+    const cur = getActiveCustomer();
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "customerAccountBtn";
+    btn.className = "secondary-btn";
+    btn.style.cssText = "margin-right:8px;padding:6px 12px;border-radius:999px;font-size:0.8rem;cursor:pointer;";
+    btn.textContent = cur
+      ? `${cur.full_name} (#${cur.user_number || "?"})`
+      : "Customer Login";
+
+    btn.addEventListener("click", () => window.openCustomerLoginModal && window.openCustomerLoginModal());
+
+    if (ownerBtn && ownerBtn.parentElement === targetParent) {
+      targetParent.insertBefore(btn, ownerBtn);
+    } else {
+      targetParent.appendChild(btn);
+    }
+  }
+
+  // Isolate wishlist per logged-in customer and sync to Supabase
+  let lastSyncedWlKey = "";
+  let lastSyncedWlJson = "";
+
+  async function syncCustomerWishlist() {
+    const cur = getActiveCustomer();
+    const st = getStoreState();
+    const currentList = Array.isArray(st.wishlist) ? st.wishlist : [];
+
+    if (!cur || !cur.customer_key) {
+      // Guest user: do not expose another user's wishlist
+      if (currentList.length > 0) {
+        st.wishlist = [];
+        saveStoreState(st);
+      }
+      return;
+    }
+
+    setCustomerLocalWishlist(cur.customer_key, currentList);
+    const snap = JSON.stringify(currentList);
+    if (cur.customer_key === lastSyncedWlKey && snap === lastSyncedWlJson) return;
+
+    const sb = getSb();
+    if (sb) {
+      await sb.from("customer_wishlists").upsert([{
+        customer_key: cur.customer_key,
+        items: currentList,
+        updated_at: new Date().toISOString()
+      }], { onConflict: "customer_key" });
+    }
+
+    lastSyncedWlKey = cur.customer_key;
+    lastSyncedWlJson = snap;
+  }
+
+  const origSetItem = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = function (key, value) {
+    origSetItem(key, value);
+    if (key === STORAGE_KEY) {
+      setTimeout(syncCustomerWishlist, 150);
+    }
+  };
+
+  setTimeout(() => {
+    injectCustomerHeaderButton();
+    const cur = getActiveCustomer();
+    if (cur && cur.customer_key) {
+      const st = getStoreState();
+      const saved = getCustomerLocalWishlist(cur.customer_key);
+      if (JSON.stringify(st.wishlist || []) !== JSON.stringify(saved)) {
+        st.wishlist = saved;
+        saveStoreState(st);
+      }
+    }
+  }, 400);
+
+  const bodyObs = new MutationObserver(() => injectCustomerHeaderButton());
+  bodyObs.observe(document.body, { childList: true, subtree: true });
+})();
