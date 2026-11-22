@@ -1447,3 +1447,139 @@
     triggerBackendExpiryCheck();
   }, 60000);
 })();
+
+/* === OWNER LONG-PRESS CUSTOM HOME BANNER ADD-ON === */
+(function () {
+  const modal = document.getElementById("ownerProductModal");
+  const form = document.getElementById("ownerProductForm");
+  if (!modal || !form) return;
+
+  function fileToDataUrl(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function injectHomeBannerOption() {
+    if (!form.querySelector("#editProdEn") || form.querySelector("#openCustomBannerBoxBtn")) return;
+
+    const btnRow = form.querySelector('button[type="submit"]')?.parentElement;
+    if (!btnRow) return;
+
+    const homeBannerBtn = document.createElement("button");
+    homeBannerBtn.type = "button";
+    homeBannerBtn.id = "openCustomBannerBoxBtn";
+    homeBannerBtn.className = "secondary-btn";
+    homeBannerBtn.textContent = "Home Banner";
+    btnRow.insertBefore(homeBannerBtn, btnRow.querySelector("#longPressDeleteBtn") || null);
+
+    const prodNameEn = (form.querySelector("#editProdEn")?.value || "").trim();
+    const bannerBox = document.createElement("div");
+    bannerBox.id = "customHomeBannerBox";
+    bannerBox.className = "hidden";
+    bannerBox.style.cssText = "margin-top:14px;padding:14px;border:1.5px solid var(--gold-500);border-radius:12px;background:var(--cream-100);";
+    bannerBox.innerHTML = `
+      <h4 style="margin:0 0 10px;color:var(--maroon-900);">Add Photo for Homepage Banner</h4>
+      <div class="form-group">
+        <label>Add Photo (Select prepared 50% Discount / Offer photo)</label>
+        <input type="file" id="customBannerFile" accept="image/*" />
+      </div>
+      <div class="form-group" style="margin-top:8px;">
+        <label>Banner Headline (e.g., 50% Discount Offer)</label>
+        <input type="text" id="customBannerTitle" value="${prodNameEn.replace(/"/g, "&quot;")}" />
+      </div>
+      <div class="form-group" style="margin-top:8px;">
+        <label>Banner Subtitle (Optional)</label>
+        <input type="text" id="customBannerSubtitle" placeholder="Tap to view this product" />
+      </div>
+      <button type="button" class="gold-btn full-width" id="publishCustomBannerBtn" style="margin-top:10px;">
+        Publish to Homepage Banner
+      </button>
+    `;
+    form.appendChild(bannerBox);
+
+    homeBannerBtn.addEventListener("click", () => {
+      bannerBox.classList.toggle("hidden");
+    });
+
+    bannerBox.querySelector("#publishCustomBannerBtn").addEventListener("click", async () => {
+      const pubBtn = bannerBox.querySelector("#publishCustomBannerBtn");
+      pubBtn.disabled = true;
+      pubBtn.textContent = "Adding Banner...";
+
+      try {
+        const stateRaw = localStorage.getItem("aakansha_store_state_v1");
+        const storeState = stateRaw ? JSON.parse(stateRaw) : window.AAKANSHA_SEED;
+        const prod = (storeState.products || []).find((p) => (p.name_en || "").trim() === prodNameEn) || (storeState.products || [])[0];
+        const cat = prod ? (storeState.categories || []).find((c) => c.id === prod.category_id) : null;
+
+        let bannerImg = prod ? prod.image : "";
+        const file = bannerBox.querySelector("#customBannerFile")?.files?.[0];
+        if (file) {
+          const cfg = window.AAKANSHA_CONFIG;
+          if (cfg?.supabase?.url && cfg?.supabase?.anonKey && window.supabase) {
+            try {
+              const sb = window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
+              const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+              const path = `banners/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
+              const { error } = await sb.storage.from(cfg.supabase.storageBucket || "shop-media").upload(path, file);
+              if (!error) {
+                const { data } = sb.storage.from(cfg.supabase.storageBucket || "shop-media").getPublicUrl(path);
+                if (data?.publicUrl) bannerImg = data.publicUrl;
+              } else {
+                bannerImg = await fileToDataUrl(file);
+              }
+            } catch (_) {
+              bannerImg = await fileToDataUrl(file);
+            }
+          } else {
+            bannerImg = await fileToDataUrl(file);
+          }
+        }
+
+        const titleText = (bannerBox.querySelector("#customBannerTitle").value || "").trim() || (prod ? prod.name_en : "Special Offer");
+        const subtitleText = (bannerBox.querySelector("#customBannerSubtitle").value || "").trim() ||
+          (prod ? `₹${Number(prod.price || 0).toLocaleString("en-IN")} • Available at Aakansha Ladies Shop` : "Visit Aakansha Ladies Shop");
+
+        const newBanner = {
+          id: "ban-" + Date.now(),
+          title_en: titleText,
+          title_mr: titleText,
+          title_hi: titleText,
+          subtitle_en: subtitleText,
+          subtitle_mr: subtitleText,
+          subtitle_hi: subtitleText,
+          image: bannerImg,
+          target_type: "product",
+          target_id: cat ? cat.id : "",
+          product_id: prod ? prod.id : "",
+          sort_order: (storeState.banners || []).length + 1
+        };
+
+        const cfg = window.AAKANSHA_CONFIG;
+        if (cfg?.supabase?.url && cfg?.supabase?.anonKey && window.supabase) {
+          try {
+            const sb = window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
+            await sb.from("banners").insert([newBanner]);
+          } catch (_) {}
+        }
+
+        storeState.banners = storeState.banners || [];
+        storeState.banners.push(newBanner);
+        localStorage.setItem("aakansha_store_state_v1", JSON.stringify(storeState));
+
+        modal.classList.add("hidden");
+        window.location.hash = "#home";
+        window.location.reload();
+      } finally {
+        pubBtn.disabled = false;
+        pubBtn.textContent = "Publish to Homepage Banner";
+      }
+    });
+  }
+
+  const observer = new MutationObserver(injectHomeBannerOption);
+  observer.observe(form, { childList: true });
+})();
