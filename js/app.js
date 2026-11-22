@@ -18,7 +18,7 @@
   let selectedRating = 5;
   let selectedOwnerRole = "Father";
   let currentAdminTab = "overview";
-  let authenticatedOwner = null; // { email, role }
+  let authenticatedOwner = null;
   let supabaseClient = null;
 
   initSupabaseIfConfigured();
@@ -1348,7 +1348,6 @@
     return escapeHtml(str).replace(/'/g, "&#39;");
   }
 
-  // BIND GLOBAL EVENTS
   document.querySelectorAll(".lang-choice-btn").forEach((btn) => {
     btn.addEventListener("click", () => setSavedLanguage(btn.getAttribute("data-lang"), true));
   });
@@ -1475,6 +1474,20 @@
     return txt.includes("dashboard") || txt.includes("डॅशबोर्ड") || txt.includes("डैशबोर्ड");
   }
 
+  function formatLoginTime(isoStr) {
+    if (!isoStr) return "Time not recorded";
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return "Time not recorded";
+    return d.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true
+    });
+  }
+
   function compressImageToBlob(file, maxWidth = 1200) {
     return new Promise((resolve) => {
       const img = new Image();
@@ -1494,7 +1507,6 @@
     });
   }
 
-  // 1) Sync store state changes to Supabase so other devices see updates
   let pushTimer = null;
   let lastSnapshot = "";
   async function pushStoreStateToSupabase(showErr = false) {
@@ -1547,7 +1559,6 @@
     lastSnapshot = raw;
   }
 
-  // 2) Home Banner option inside owner product editor
   function injectHomeBannerOption() {
     const modal = document.getElementById("ownerProductModal");
     const form = document.getElementById("ownerProductForm");
@@ -1658,7 +1669,6 @@
     });
   }
 
-  // 3) Owner long-press delete on homepage banners
   function bindBannerLongPressDelete() {
     const track = document.getElementById("bannerTrack");
     if (!track) return;
@@ -1714,7 +1724,6 @@
     });
   }
 
-  // 4) Customer Login + User Number + Per-User Wishlist
   function normalizeCustomerKey(phone, email) {
     const p = (phone || "").replace(/\D/g, "").slice(-10);
     const e = (email || "").trim().toLowerCase();
@@ -1838,6 +1847,7 @@
       if (!key) return alert("Please enter either a Mobile Number or Gmail.");
       if (otpCode && enteredOtp !== otpCode) return alert("Invalid OTP. Please enter: " + otpCode);
 
+      const nowIso = new Date().toISOString();
       const sb = getSb();
       let userNumber = null;
       let dbItems = null;
@@ -1848,7 +1858,7 @@
           full_name: fullName,
           phone: phone || null,
           email: email || null,
-          last_login_at: new Date().toISOString()
+          last_login_at: nowIso
         }], { onConflict: "customer_key" });
 
         const { data: acc } = await sb.from("customer_accounts").select("user_number").eq("customer_key", key).maybeSingle();
@@ -1867,7 +1877,7 @@
         userNumber = seqMap[key];
       }
 
-      setActiveCustomer({ customer_key: key, user_number: userNumber, full_name: fullName, phone, email });
+      setActiveCustomer({ customer_key: key, user_number: userNumber, full_name: fullName, phone, email, last_login_at: nowIso });
       const merged = dbItems !== null ? [...dbItems] : [...getCustomerWl(key)];
       if (pendingWishProdId && !merged.includes(pendingWishProdId)) {
         merged.push(pendingWishProdId);
@@ -1880,7 +1890,7 @@
         await sb.from("customer_wishlists").upsert([{
           customer_key: key,
           items: merged,
-          updated_at: new Date().toISOString()
+          updated_at: nowIso
         }], { onConflict: "customer_key" });
       }
 
@@ -1926,38 +1936,48 @@
     else parent.appendChild(btn);
   }
 
-  // 5) Owner-only Members list inside Owner Dashboard
   async function injectOwnerMembersSection() {
     const dash = document.getElementById("ownerDashboardView");
+    const tabsBar = document.getElementById("adminTabsBar");
     if (!dash || dash.classList.contains("hidden") || !isOwnerSessionActive()) return;
     if (dash.querySelector("#ownerCustomerMembersBox")) return;
 
     const box = document.createElement("div");
     box.id = "ownerCustomerMembersBox";
     box.className = "admin-card";
-    box.innerHTML = `<h3>Registered Customers (Owner Only)</h3><div id="ownerMembersList">Loading members...</div>`;
-    dash.appendChild(box);
+    box.style.cssText = "border:2px solid var(--gold-500);margin-bottom:16px;";
+    box.innerHTML = `<h3>Logged-In Customers (Owner Only)</h3><div id="ownerMembersList">Loading logged-in users...</div>`;
+
+    if (tabsBar && tabsBar.parentElement === dash) {
+      tabsBar.insertAdjacentElement("afterend", box);
+    } else {
+      dash.prepend(box);
+    }
 
     const sb = getSb();
     let rows = [];
     if (sb) {
-      const { data } = await sb.from("customer_accounts").select("user_number, full_name, phone, email").order("user_number", { ascending: true });
+      const { data } = await sb
+        .from("customer_accounts")
+        .select("user_number, full_name, phone, email, last_login_at")
+        .order("last_login_at", { ascending: false });
       if (Array.isArray(data)) rows = data;
     }
 
     const listEl = box.querySelector("#ownerMembersList");
     if (!rows.length) {
-      listEl.innerHTML = `<p class="muted-copy">No customers logged in yet.</p>`;
+      listEl.innerHTML = `<p class="muted-copy">No customers have logged in yet.</p>`;
       return;
     }
 
     listEl.innerHTML = `
-      <p style="margin:0 0 8px;font-weight:700;">Total Members: ${rows.length}</p>
-      <div style="max-height:220px;overflow:auto;">
+      <p style="margin:0 0 10px;font-weight:700;">Total Logged-In Users: ${rows.length}</p>
+      <div style="max-height:260px;overflow:auto;">
         ${rows.map((r) => `
-          <div style="padding:8px 0;border-bottom:1px solid var(--border-soft);">
-            <strong>#${r.user_number} — ${r.full_name}</strong><br/>
-            <small>${r.phone ? "📞 " + r.phone : ""} ${r.email ? "• ✉️ " + r.email : ""}</small>
+          <div style="padding:10px 0;border-bottom:1px solid var(--border-soft);">
+            <strong>User #${r.user_number ?? "?"} — ${r.full_name || "Customer"}</strong><br/>
+            <small>Email: ${r.email || "—"} ${r.phone ? "• Mobile: " + r.phone : ""}</small><br/>
+            <small style="color:var(--maroon-900);font-weight:600;">Logged in at: ${formatLoginTime(r.last_login_at)}</small>
           </div>
         `).join("")}
       </div>
