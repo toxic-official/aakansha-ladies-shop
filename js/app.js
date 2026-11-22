@@ -1448,7 +1448,7 @@
   }, 60000);
 })();
 
-/* === OWNER LONG-PRESS CUSTOM HOME BANNER ADD-ON (READY) === */
+/* === OWNER LONG-PRESS CUSTOM HOME BANNER + BANNER LONG-PRESS DELETE ADD-ON === */
 (function () {
   const modal = document.getElementById("ownerProductModal");
   const form = document.getElementById("ownerProductForm");
@@ -1473,8 +1473,14 @@
     });
   }
 
+  function getSupabaseWithSession() {
+    const cfg = window.AAKANSHA_CONFIG;
+    if (!cfg?.supabase?.url || !cfg?.supabase?.anonKey || !window.supabase) return null;
+    return window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
+  }
+
   async function ensureSession(sb) {
-    if (!sb) return;
+    if (!sb) return false;
     const authKey = Object.keys(localStorage).find((k) => k.startsWith("sb-") && k.endsWith("-auth-token"));
     if (authKey) {
       try {
@@ -1484,9 +1490,46 @@
             access_token: parsedAuth.access_token,
             refresh_token: parsedAuth.refresh_token
           });
+          return true;
         }
       } catch (_) {}
     }
+    const { data } = await sb.auth.getSession();
+    return Boolean(data?.session);
+  }
+
+  async function ensureProductInDb(sb, prod, cat) {
+    if (!sb || !prod || !prod.id) return false;
+    const { data: found } = await sb.from("products").select("id").eq("id", prod.id).maybeSingle();
+    if (found && found.id) return true;
+
+    if (cat && cat.id) {
+      await sb.from("categories").upsert([{
+        id: cat.id,
+        slug: cat.slug || cat.id,
+        name_en: cat.name_en || "Category",
+        name_mr: cat.name_mr || cat.name_en || "विभाग",
+        name_hi: cat.name_hi || cat.name_en || "श्रेणी",
+        image: cat.image || prod.image || "",
+        sort_order: Number(cat.sort_order || 1)
+      }], { onConflict: "id" });
+    }
+
+    const { error } = await sb.from("products").upsert([{
+      id: prod.id,
+      category_id: (cat && cat.id) || prod.category_id || "cat-cosmetics",
+      name_en: prod.name_en || "Product",
+      name_mr: prod.name_mr || prod.name_en || "उत्पादन",
+      name_hi: prod.name_hi || prod.name_en || "उत्पाद",
+      price: Number(prod.price || 0),
+      stock: Number(prod.stock || 0),
+      image: prod.image || "",
+      is_new_arrival: Boolean(prod.is_new_arrival),
+      is_popular: Boolean(prod.is_popular),
+      sort_order: Number(prod.sort_order || 1)
+    }], { onConflict: "id" });
+
+    return !error;
   }
 
   function injectHomeBannerOption() {
@@ -1538,15 +1581,12 @@
 
       try {
         const stateRaw = localStorage.getItem("aakansha_store_state_v1");
-        const storeState = stateRaw ? JSON.parse(stateRaw) : window.AAKANSHA_SEED;
+        const storeState = stateRaw ? JSON.parse(stateRaw) : JSON.parse(JSON.stringify(window.AAKANSHA_SEED));
         const prod = (storeState.products || []).find((p) => (p.name_en || "").trim() === prodNameEn) || (storeState.products || [])[0];
         const cat = prod ? (storeState.categories || []).find((c) => c.id === prod.category_id) : null;
 
         const cfg = window.AAKANSHA_CONFIG;
-        const sb = (cfg?.supabase?.url && cfg?.supabase?.anonKey && window.supabase)
-          ? window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey)
-          : null;
-
+        const sb = getSupabaseWithSession();
         await ensureSession(sb);
 
         let bannerImg = prod ? prod.image : "";
@@ -1571,6 +1611,9 @@
         const subtitleText = (bannerBox.querySelector("#customBannerSubtitle").value || "").trim() ||
           (prod ? `₹${Number(prod.price || 0).toLocaleString("en-IN")} • Available at Aakansha Ladies Shop` : "Visit Aakansha Ladies Shop");
 
+        const existingBanners = Array.isArray(storeState.banners) ? storeState.banners : [];
+        const maxOrder = existingBanners.reduce((m, b) => Math.max(m, Number(b.sort_order || 0)), 0);
+
         const localBanner = {
           id: "ban-" + Date.now(),
           title_en: titleText,
@@ -1583,18 +1626,28 @@
           target_type: "product",
           target_id: cat ? cat.id : "",
           product_id: prod ? prod.id : "",
-          sort_order: 0
+          sort_order: maxOrder + 1
         };
 
-        let dbBanner = { ...localBanner };
-        if (sb && dbBanner.product_id) {
-          const { data: existingProd } = await sb
-            .from("products")
-            .select("id")
-            .eq("id", dbBanner.product_id)
-            .maybeSingle();
-          if (!existingProd) {
-            dbBanner.product_id = null;
+        const dbBanner = {
+          id: localBanner.id,
+          title_en: localBanner.title_en,
+          title_mr: localBanner.title_mr,
+          title_hi: localBanner.title_hi,
+          subtitle_en: localBanner.subtitle_en,
+          subtitle_mr: localBanner.subtitle_mr,
+          subtitle_hi: localBanner.subtitle_hi,
+          image: localBanner.image,
+          target_type: localBanner.target_type,
+          target_id: localBanner.target_id,
+          product_id: null,
+          sort_order: localBanner.sort_order
+        };
+
+        if (sb && prod && prod.id) {
+          const synced = await ensureProductInDb(sb, prod, cat);
+          if (synced) {
+            dbBanner.product_id = prod.id;
           }
         }
 
@@ -1606,7 +1659,7 @@
           }
         }
 
-        storeState.banners = [localBanner, ...(storeState.banners || [])];
+        storeState.banners = [...existingBanners, localBanner];
         localStorage.setItem("aakansha_store_state_v1", JSON.stringify(storeState));
 
         modal.classList.add("hidden");
@@ -1619,6 +1672,83 @@
     });
   }
 
-  const observer = new MutationObserver(injectHomeBannerOption);
-  observer.observe(form, { childList: true });
+  function bindBannerLongPressDelete() {
+    const track = document.getElementById("bannerTrack");
+    if (!track) return;
+
+    track.querySelectorAll(".banner-slide").forEach((slide) => {
+      if (slide.dataset.longPressBound === "1") return;
+      slide.dataset.longPressBound = "1";
+
+      let timer = null;
+      let longPressed = false;
+
+      const isOwnerLoggedIn = () => {
+        const ownerBtnText = (document.getElementById("ownerBtnText")?.textContent || "").toLowerCase();
+        return ownerBtnText.includes("dashboard") || ownerBtnText.includes("डॅशबोर्ड") || ownerBtnText.includes("डैशबोर्ड");
+      };
+
+      const startTimer = (e) => {
+        if (!isOwnerLoggedIn()) return;
+        longPressed = false;
+        timer = setTimeout(async () => {
+          longPressed = true;
+          const bannerId = slide.getAttribute("data-banner-id");
+          if (!bannerId) return;
+
+          const ok = confirm("Remove this banner from Homepage?");
+          if (!ok) return;
+
+          const sb = getSupabaseWithSession();
+          const hasSess = await ensureSession(sb);
+          if (sb && hasSess) {
+            const { error } = await sb.from("banners").delete().eq("id", bannerId);
+            if (error) {
+              alert("Could not delete banner: " + error.message);
+              return;
+            }
+          }
+
+          try {
+            const raw = localStorage.getItem("aakansha_store_state_v1");
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              parsed.banners = (parsed.banners || []).filter((b) => b.id !== bannerId);
+              localStorage.setItem("aakansha_store_state_v1", JSON.stringify(parsed));
+            }
+          } catch (_) {}
+
+          window.location.reload();
+        }, 600);
+      };
+
+      const cancelTimer = () => {
+        clearTimeout(timer);
+      };
+
+      slide.addEventListener("mousedown", startTimer);
+      slide.addEventListener("touchstart", startTimer, { passive: true });
+      slide.addEventListener("mouseup", cancelTimer);
+      slide.addEventListener("mouseleave", cancelTimer);
+      slide.addEventListener("touchend", cancelTimer);
+
+      slide.addEventListener("click", (e) => {
+        if (longPressed) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          longPressed = false;
+        }
+      }, true);
+    });
+  }
+
+  const formObserver = new MutationObserver(injectHomeBannerOption);
+  formObserver.observe(form, { childList: true });
+
+  const trackEl = document.getElementById("bannerTrack");
+  if (trackEl) {
+    const trackObserver = new MutationObserver(bindBannerLongPressDelete);
+    trackObserver.observe(trackEl, { childList: true });
+    bindBannerLongPressDelete();
+  }
 })();
