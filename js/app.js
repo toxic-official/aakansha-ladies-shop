@@ -2033,3 +2033,113 @@
     injectOwnerMembersSection();
   }).observe(document.body, { childList: true, subtree: true });
 })();
+/* === OWNER DASHBOARD LOGGED-IN CUSTOMERS VIEWER (PASTE AT VERY BOTTOM) === */
+(function () {
+  function getSupabaseClientSafe() {
+    const cfg = window.AAKANSHA_CONFIG;
+    if (!cfg?.supabase?.url || !cfg?.supabase?.anonKey || !window.supabase) return null;
+    return window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
+  }
+
+  function formatLoginDateTime(iso) {
+    if (!iso) return "Time not recorded";
+    const dt = new Date(iso);
+    if (isNaN(dt.getTime())) return "Time not recorded";
+    return dt.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true
+    });
+  }
+
+  function escapeText(val) {
+    return String(val ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function isOwnerDashboardVisible() {
+    const dash = document.getElementById("ownerDashboardView");
+    return Boolean(dash && !dash.classList.contains("hidden"));
+  }
+
+  async function renderLoggedInCustomersBox() {
+    if (!isOwnerDashboardVisible()) return;
+
+    const dash = document.getElementById("ownerDashboardView");
+    const tabContent = document.getElementById("adminTabContent");
+    const host = tabContent || dash;
+    if (!host) return;
+
+    let card = document.getElementById("ownerLoginHistoryCard");
+    if (!card) {
+      card = document.createElement("div");
+      card.id = "ownerLoginHistoryCard";
+      card.className = "admin-card";
+      card.style.cssText = "border:2px solid var(--gold-500);margin-top:16px;";
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <h3 style="margin:0;">Logged-In Customers (Owner Only)</h3>
+          <button type="button" id="refreshOwnerLoginListBtn" class="outline-btn">Refresh</button>
+        </div>
+        <div id="ownerLoginHistoryList">Loading logged-in users...</div>
+      `;
+      host.prepend(card);
+
+      card.querySelector("#refreshOwnerLoginListBtn").addEventListener("click", () => {
+        renderLoggedInCustomersBox();
+      });
+    } else if (card.parentElement !== host) {
+      host.prepend(card);
+    }
+
+    const listEl = document.getElementById("ownerLoginHistoryList");
+    if (!listEl) return;
+
+    const sb = getSupabaseClientSafe();
+    let rows = [];
+
+    if (sb) {
+      const { data, error } = await sb
+        .from("customer_accounts")
+        .select("user_number, full_name, phone, email, last_login_at")
+        .order("last_login_at", { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        rows = data;
+      }
+    }
+
+    if (!rows.length) {
+      listEl.innerHTML = `<p class="muted-copy" style="margin:0;">No customers have logged in yet.</p>`;
+      return;
+    }
+
+    listEl.innerHTML = `
+      <p style="margin:0 0 10px;font-weight:700;">Total Logged-In Users: ${rows.length}</p>
+      <div style="max-height:280px;overflow:auto;">
+        ${rows.map((u) => `
+          <div style="padding:10px 0;border-bottom:1px solid var(--border-soft);">
+            <strong>User #${escapeText(u.user_number ?? "?")} — ${escapeText(u.full_name || "Customer")}</strong><br />
+            <small>Email: ${escapeText(u.email || "—")} ${u.phone ? "• Mobile: " + escapeText(u.phone) : ""}</small><br />
+            <small style="color:var(--maroon-900);font-weight:700;">Logged in at: ${escapeText(formatLoginDateTime(u.last_login_at))}</small>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  let syncTimer = null;
+  const observer = new MutationObserver(() => {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(renderLoggedInCustomersBox, 200);
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  setTimeout(renderLoggedInCustomersBox, 500);
+})();
