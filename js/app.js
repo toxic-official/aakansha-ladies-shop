@@ -2349,3 +2349,23 @@
 
   setTimeout(hideOverviewLoginBoxes, 300);
 })();
+/* === PERMANENTLY HIDE OVERVIEW BOX WITHOUT FLICKER + KEEP "User Login" TAB === */
+(function () {
+  function cleanOverviewWithoutFlicker() {
+    ["myLoginUsersBox", "ownerLoginHistoryCard", "ownerCustomerMembersBox", "ownerLoginUsersInsideBox"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el && el.style.display !== "none") {
+        el.style.display = "none";
+      }
+    });
+  }
+
+  const observer = new MutationObserver(() => {
+    observer.disconnect();
+    cleanOverviewWithoutFlicker();
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+
+  cleanOverviewWithoutFlicker();
+  observer.observe(document.body, { childList: true, subtree: true });
+})();
