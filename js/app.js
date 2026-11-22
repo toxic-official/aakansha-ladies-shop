@@ -2369,3 +2369,165 @@
   cleanOverviewWithoutFlicker();
   observer.observe(document.body, { childList: true, subtree: true });
 })();
+/* === STABLE "User Login" TAB FIX (NO AUTO-CLOSE / NO LOOP) === */
+(function () {
+  let isUserLoginActive = false;
+  let lastRenderedSignature = "";
+
+  function getSb() {
+    const cfg = window.AAKANSHA_CONFIG;
+    if (!cfg?.supabase?.url || !cfg?.supabase?.anonKey || !window.supabase) return null;
+    return window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
+  }
+
+  function esc(v) {
+    return String(v ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return "Time not recorded";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "Time not recorded";
+    return d.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true
+    });
+  }
+
+  function paintRows(rows, queryText) {
+    const listBox = document.getElementById("stableUserLoginRows");
+    const countEl = document.getElementById("stableUserLoginCount");
+    if (!listBox) return;
+
+    const q = (queryText || "").trim().toLowerCase();
+    const list = !q
+      ? rows
+      : rows.filter((u) =>
+          String(u.user_number ?? "").toLowerCase().includes(q) ||
+          String(u.full_name ?? "").toLowerCase().includes(q) ||
+          String(u.email ?? "").toLowerCase().includes(q) ||
+          String(u.phone ?? "").toLowerCase().includes(q)
+        );
+
+    if (countEl) countEl.textContent = `Showing ${list.length} of ${rows.length} Users`;
+
+    if (!list.length) {
+      listBox.innerHTML = `<p style="padding:12px;margin:0;">No users found.</p>`;
+      return;
+    }
+
+    listBox.innerHTML = list.map((u) => `
+      <div style="padding:10px 12px;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <div>
+          <strong>User #${esc(u.user_number ?? "?")} — ${esc(u.full_name || "Customer")}</strong><br />
+          <small>Email: ${esc(u.email || "—")} ${u.phone ? "• Mobile: " + esc(u.phone) : ""}</small>
+        </div>
+        <div style="text-align:right;">
+          <small style="color:var(--maroon-900);font-weight:700;">Logged in at:</small><br />
+          <small>${esc(fmtTime(u.last_login_at))}</small>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  async function showStableUserLoginPanel(forceReload = false) {
+    const dash = document.getElementById("ownerDashboardView");
+    const panel = document.getElementById("adminTabContent");
+    const tabsBar = document.getElementById("adminTabsBar");
+    if (!dash || dash.classList.contains("hidden") || !panel) return;
+
+    isUserLoginActive = true;
+
+    if (tabsBar) {
+      tabsBar.querySelectorAll(".admin-tab").forEach((b) => {
+        b.classList.toggle("active", b.id === "userLoginAdminTabBtn");
+      });
+    }
+
+    if (!document.getElementById("stableUserLoginCard") || forceReload) {
+      panel.innerHTML = `
+        <div id="stableUserLoginCard" class="admin-card" style="border:2px solid var(--gold-500);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+            <div>
+              <h3 style="margin:0;">All Logged-In Users</h3>
+              <small id="stableUserLoginCount" class="muted-copy">Loading...</small>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <input type="search" id="stableUserSearchInput" placeholder="Search name, email, phone..." style="padding:8px 11px;border:1px solid var(--border-soft);border-radius:8px;min-width:200px;" />
+              <button type="button" id="stableUserRefreshBtn" class="outline-btn">Refresh</button>
+            </div>
+          </div>
+          <div id="stableUserLoginRows" style="max-height:520px;overflow-y:auto;border:1px solid var(--border-soft);border-radius:10px;">
+            <p style="padding:12px;margin:0;">Loading users...</p>
+          </div>
+        </div>
+      `;
+
+      const searchEl = document.getElementById("stableUserSearchInput");
+      let rowsCache = [];
+
+      const loadData = async () => {
+        const sb = getSb();
+        if (!sb) return;
+        const { data, error } = await sb
+          .from("customer_accounts")
+          .select("user_number, full_name, email, phone, last_login_at")
+          .order("last_login_at", { ascending: false });
+        if (!error && Array.isArray(data)) {
+          rowsCache = data;
+          lastRenderedSignature = JSON.stringify(data);
+        }
+        paintRows(rowsCache, searchEl?.value || "");
+      };
+
+      searchEl?.addEventListener("input", () => paintRows(rowsCache, searchEl.value));
+      document.getElementById("stableUserRefreshBtn")?.addEventListener("click", loadData);
+      await loadData();
+    }
+  }
+
+  function attachTabListeners() {
+    const tabsBar = document.getElementById("adminTabsBar");
+    if (!tabsBar) return;
+
+    const ulBtn = document.getElementById("userLoginAdminTabBtn");
+    if (ulBtn && !ulBtn.dataset.stableBound) {
+      ulBtn.dataset.stableBound = "1";
+      ulBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        showStableUserLoginPanel(true);
+      }, true);
+    }
+
+    tabsBar.querySelectorAll(".admin-tab").forEach((b) => {
+      if (b.id !== "userLoginAdminTabBtn" && !b.dataset.stableExitBound) {
+        b.dataset.stableExitBound = "1";
+        b.addEventListener("click", () => {
+          isUserLoginActive = false;
+          document.getElementById("userLoginAdminTabBtn")?.classList.remove("active");
+        });
+      }
+    });
+  }
+
+  const obs = new MutationObserver(() => {
+    obs.disconnect();
+    attachTabListeners();
+    if (isUserLoginActive && !document.getElementById("stableUserLoginCard")) {
+      showStableUserLoginPanel(false);
+    }
+    obs.observe(document.body, { childList: true, subtree: true });
+  });
+
+  attachTabListeners();
+  obs.observe(document.body, { childList: true, subtree: true });
+})();
