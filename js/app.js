@@ -2169,3 +2169,167 @@
   new MutationObserver(() => setTimeout(showUsers, 250)).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
   setTimeout(showUsers, 500);
 })();
+/* === USER LOGIN TAB IN ADMIN TABS BAR === */
+(function () {
+  function getSb() {
+    const cfg = window.AAKANSHA_CONFIG;
+    if (!cfg?.supabase?.url || !cfg?.supabase?.anonKey || !window.supabase) return null;
+    return window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
+  }
+
+  function esc(v) {
+    return String(v ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return "Time not recorded";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "Time not recorded";
+    return d.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true
+    });
+  }
+
+  let allUsersCache = [];
+  let userTabSelected = false;
+
+  async function fetchAllLoggedInUsers() {
+    const sb = getSb();
+    if (!sb) return allUsersCache;
+    const { data, error } = await sb
+      .from("customer_accounts")
+      .select("user_number, full_name, email, phone, last_login_at")
+      .order("last_login_at", { ascending: false });
+    if (!error && Array.isArray(data)) allUsersCache = data;
+    return allUsersCache;
+  }
+
+  function renderUsersListRows(queryText = "") {
+    const container = document.getElementById("allUsersRowsContainer");
+    const countLabel = document.getElementById("allUsersCountLabel");
+    if (!container) return;
+
+    const q = queryText.trim().toLowerCase();
+    const filtered = !q
+      ? allUsersCache
+      : allUsersCache.filter((u) =>
+          String(u.user_number ?? "").toLowerCase().includes(q) ||
+          String(u.full_name ?? "").toLowerCase().includes(q) ||
+          String(u.email ?? "").toLowerCase().includes(q) ||
+          String(u.phone ?? "").toLowerCase().includes(q)
+        );
+
+    if (countLabel) {
+      countLabel.textContent = `Showing ${filtered.length} of ${allUsersCache.length} Logged-In Users`;
+    }
+
+    if (!filtered.length) {
+      container.innerHTML = `<p class="muted-copy" style="margin:10px 0 0;">No matching users found.</p>`;
+      return;
+    }
+
+    container.innerHTML = filtered.map((u) => `
+      <div style="padding:10px 12px;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;">
+        <div>
+          <strong style="font-size:1rem;">User #${esc(u.user_number ?? "?")} — ${esc(u.full_name || "Customer")}</strong><br />
+          <small>Email: ${esc(u.email || "—")} ${u.phone ? "• Mobile: " + esc(u.phone) : ""}</small>
+        </div>
+        <div style="text-align:right;">
+          <small style="color:var(--maroon-900);font-weight:700;">Logged in at:</small><br />
+          <small>${esc(fmtTime(u.last_login_at))}</small>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  async function openUserLoginTabPanel() {
+    userTabSelected = true;
+    const tabsBar = document.getElementById("adminTabsBar");
+    const panel = document.getElementById("adminTabContent");
+    if (!panel) return;
+
+    if (tabsBar) {
+      tabsBar.querySelectorAll(".admin-tab").forEach((b) => {
+        b.classList.toggle("active", b.id === "userLoginAdminTabBtn");
+      });
+    }
+
+    panel.innerHTML = `
+      <div class="admin-card" style="border:2px solid var(--gold-500);">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+          <div>
+            <h3 style="margin:0;">All Logged-In Users</h3>
+            <small id="allUsersCountLabel" class="muted-copy">Loading users...</small>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input type="search" id="searchAllLoggedUsersInput" placeholder="Search name, email, phone, #..." style="padding:8px 11px;border:1px solid var(--border-soft);border-radius:8px;min-width:210px;" />
+            <button type="button" id="refreshAllUsersTabBtn" class="outline-btn">Refresh</button>
+          </div>
+        </div>
+        <div id="allUsersRowsContainer" style="max-height:520px;overflow-y:auto;border:1px solid var(--border-soft);border-radius:10px;">
+          <p style="padding:12px;margin:0;">Loading all users...</p>
+        </div>
+      </div>
+    `;
+
+    const searchInput = document.getElementById("searchAllLoggedUsersInput");
+    searchInput?.addEventListener("input", () => renderUsersListRows(searchInput.value));
+    document.getElementById("refreshAllUsersTabBtn")?.addEventListener("click", async () => {
+      await fetchAllLoggedInUsers();
+      renderUsersListRows(searchInput?.value || "");
+    });
+
+    await fetchAllLoggedInUsers();
+    renderUsersListRows(searchInput?.value || "");
+  }
+
+  function ensureUserLoginTabButton() {
+    const dash = document.getElementById("ownerDashboardView");
+    const tabsBar = document.getElementById("adminTabsBar");
+    if (!dash || dash.classList.contains("hidden") || !tabsBar) return;
+
+    const oldBox = document.getElementById("myLoginUsersBox") || document.getElementById("ownerLoginHistoryCard");
+    if (oldBox) oldBox.remove();
+
+    if (!document.getElementById("userLoginAdminTabBtn")) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.id = "userLoginAdminTabBtn";
+      btn.className = "admin-tab";
+      btn.textContent = "User Login";
+      btn.addEventListener("click", openUserLoginTabPanel);
+      tabsBar.appendChild(btn);
+    }
+
+    tabsBar.querySelectorAll(".admin-tab").forEach((b) => {
+      if (b.id !== "userLoginAdminTabBtn" && !b.dataset.ulBound) {
+        b.dataset.ulBound = "1";
+        b.addEventListener("click", () => {
+          userTabSelected = false;
+          document.getElementById("userLoginAdminTabBtn")?.classList.remove("active");
+        });
+      }
+    });
+
+    if (userTabSelected) {
+      openUserLoginTabPanel();
+    }
+  }
+
+  let t = null;
+  new MutationObserver(() => {
+    clearTimeout(t);
+    t = setTimeout(ensureUserLoginTabButton, 180);
+  }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+
+  setTimeout(ensureUserLoginTabButton, 450);
+})();
