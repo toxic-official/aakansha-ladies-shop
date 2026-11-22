@@ -1448,17 +1448,28 @@
   }, 60000);
 })();
 
-/* === OWNER LONG-PRESS CUSTOM HOME BANNER ADD-ON === */
+/* === OWNER LONG-PRESS CUSTOM HOME BANNER ADD-ON (FIXED) === */
 (function () {
   const modal = document.getElementById("ownerProductModal");
   const form = document.getElementById("ownerProductForm");
   if (!modal || !form) return;
 
-  function fileToDataUrl(file) {
+  function compressImageToBlob(file, maxWidth = 1200) {
     return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.readAsDataURL(file);
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", 0.82);
+      };
+      img.onerror = () => resolve(file);
+      img.src = url;
     });
   }
 
@@ -1483,11 +1494,11 @@
     bannerBox.innerHTML = `
       <h4 style="margin:0 0 10px;color:var(--maroon-900);">Add Photo for Homepage Banner</h4>
       <div class="form-group">
-        <label>Add Photo (Select prepared 50% Discount / Offer photo)</label>
+        <label>Add Photo (Select 50% Discount / Offer photo)</label>
         <input type="file" id="customBannerFile" accept="image/*" />
       </div>
       <div class="form-group" style="margin-top:8px;">
-        <label>Banner Headline (e.g., 50% Discount Offer)</label>
+        <label>Banner Headline</label>
         <input type="text" id="customBannerTitle" value="${prodNameEn.replace(/"/g, "&quot;")}" />
       </div>
       <div class="form-group" style="margin-top:8px;">
@@ -1507,7 +1518,7 @@
     bannerBox.querySelector("#publishCustomBannerBtn").addEventListener("click", async () => {
       const pubBtn = bannerBox.querySelector("#publishCustomBannerBtn");
       pubBtn.disabled = true;
-      pubBtn.textContent = "Adding Banner...";
+      pubBtn.textContent = "Publishing Banner...";
 
       try {
         const stateRaw = localStorage.getItem("aakansha_store_state_v1");
@@ -1515,27 +1526,26 @@
         const prod = (storeState.products || []).find((p) => (p.name_en || "").trim() === prodNameEn) || (storeState.products || [])[0];
         const cat = prod ? (storeState.categories || []).find((c) => c.id === prod.category_id) : null;
 
+        const cfg = window.AAKANSHA_CONFIG;
+        const sb = (cfg?.supabase?.url && cfg?.supabase?.anonKey && window.supabase)
+          ? window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey)
+          : null;
+
         let bannerImg = prod ? prod.image : "";
-        const file = bannerBox.querySelector("#customBannerFile")?.files?.[0];
-        if (file) {
-          const cfg = window.AAKANSHA_CONFIG;
-          if (cfg?.supabase?.url && cfg?.supabase?.anonKey && window.supabase) {
-            try {
-              const sb = window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
-              const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-              const path = `banners/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
-              const { error } = await sb.storage.from(cfg.supabase.storageBucket || "shop-media").upload(path, file);
-              if (!error) {
-                const { data } = sb.storage.from(cfg.supabase.storageBucket || "shop-media").getPublicUrl(path);
-                if (data?.publicUrl) bannerImg = data.publicUrl;
-              } else {
-                bannerImg = await fileToDataUrl(file);
-              }
-            } catch (_) {
-              bannerImg = await fileToDataUrl(file);
-            }
+        const rawFile = bannerBox.querySelector("#customBannerFile")?.files?.[0];
+
+        if (rawFile && sb) {
+          const compressed = await compressImageToBlob(rawFile, 1200);
+          const path = `banners/ban-${Date.now()}.jpg`;
+          const { error: upErr } = await sb.storage
+            .from(cfg.supabase.storageBucket || "shop-media")
+            .upload(path, compressed, { contentType: "image/jpeg", upsert: true });
+
+          if (!upErr) {
+            const { data } = sb.storage.from(cfg.supabase.storageBucket || "shop-media").getPublicUrl(path);
+            if (data?.publicUrl) bannerImg = data.publicUrl;
           } else {
-            bannerImg = await fileToDataUrl(file);
+            alert("Photo upload error: " + upErr.message + "\n(Check Supabase Storage bucket 'shop-media' policies)");
           }
         }
 
@@ -1555,19 +1565,18 @@
           target_type: "product",
           target_id: cat ? cat.id : "",
           product_id: prod ? prod.id : "",
-          sort_order: (storeState.banners || []).length + 1
+          sort_order: 0
         };
 
-        const cfg = window.AAKANSHA_CONFIG;
-        if (cfg?.supabase?.url && cfg?.supabase?.anonKey && window.supabase) {
-          try {
-            const sb = window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey);
-            await sb.from("banners").insert([newBanner]);
-          } catch (_) {}
+        if (sb) {
+          const { error: dbErr } = await sb.from("banners").insert([newBanner]);
+          if (dbErr) {
+            alert("Database save error: " + dbErr.message);
+            return;
+          }
         }
 
-        storeState.banners = storeState.banners || [];
-        storeState.banners.push(newBanner);
+        storeState.banners = [newBanner, ...(storeState.banners || [])];
         localStorage.setItem("aakansha_store_state_v1", JSON.stringify(storeState));
 
         modal.classList.add("hidden");
