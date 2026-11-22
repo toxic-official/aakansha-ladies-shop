@@ -1448,7 +1448,7 @@
   }, 60000);
 })();
 
-/* === OWNER LONG-PRESS CUSTOM HOME BANNER + BANNER LONG-PRESS DELETE ADD-ON === */
+/* === OWNER LONG-PRESS CUSTOM HOME BANNER + BANNER LONG-PRESS DELETE + DB SYNC ADD-ON === */
 (function () {
   const modal = document.getElementById("ownerProductModal");
   const form = document.getElementById("ownerProductForm");
@@ -1530,6 +1530,40 @@
     }], { onConflict: "id" });
 
     return !error;
+  }
+
+  // Push newly added products from localStorage to Supabase so other devices (like Papa's phone) see them
+  let syncingNewProd = false;
+  async function syncNewestProductToDb() {
+    if (syncingNewProd) return;
+    syncingNewProd = true;
+    try {
+      const sb = getSupabaseWithSession();
+      const hasSess = await ensureSession(sb);
+      if (!sb || !hasSess) return;
+
+      const raw = localStorage.getItem("aakansha_store_state_v1");
+      if (!raw) return;
+      const storeState = JSON.parse(raw);
+      const prods = Array.isArray(storeState.products) ? storeState.products : [];
+      const cats = Array.isArray(storeState.categories) ? storeState.categories : [];
+      if (!prods.length) return;
+
+      const { data: dbProds } = await sb.from("products").select("id");
+      const dbIds = new Set((dbProds || []).map((r) => r.id));
+
+      for (const p of prods) {
+        if (p && p.id && !dbIds.has(p.id)) {
+          const cat = cats.find((c) => c.id === p.category_id) || null;
+          const ok = await ensureProductInDb(sb, p, cat);
+          if (!ok) {
+            alert("New product DB sync issue for: " + (p.name_en || p.id));
+          }
+        }
+      }
+    } finally {
+      syncingNewProd = false;
+    }
   }
 
   function injectHomeBannerOption() {
@@ -1688,7 +1722,7 @@
         return ownerBtnText.includes("dashboard") || ownerBtnText.includes("डॅशबोर्ड") || ownerBtnText.includes("डैशबोर्ड");
       };
 
-      const startTimer = (e) => {
+      const startTimer = () => {
         if (!isOwnerLoggedIn()) return;
         longPressed = false;
         timer = setTimeout(async () => {
@@ -1742,7 +1776,10 @@
     });
   }
 
-  const formObserver = new MutationObserver(injectHomeBannerOption);
+  const formObserver = new MutationObserver(() => {
+    injectHomeBannerOption();
+    syncNewestProductToDb();
+  });
   formObserver.observe(form, { childList: true });
 
   const trackEl = document.getElementById("bannerTrack");
@@ -1751,4 +1788,6 @@
     trackObserver.observe(trackEl, { childList: true });
     bindBannerLongPressDelete();
   }
+
+  setTimeout(syncNewestProductToDb, 1500);
 })();
